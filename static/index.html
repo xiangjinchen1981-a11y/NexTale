@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>织叙-NexTale</title>
+  <link rel="stylesheet" href="style.css?v=20260823l">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">📖 织叙-NexTale</div>
+    <nav class="tabs" id="main-tabs">
+      <button class="tab" data-tab="genres">题材库</button>
+      <button class="tab" data-tab="novels">小说创作</button>
+      <button class="tab" data-tab="logs">日志</button>
+    </nav>
+    <span class="spacer"></span>
+    <button class="btn" id="btn-providers" onclick="nav('#/providers')">API 配置</button>
+    <button class="btn theme-toggle" id="btn-theme" onclick="toggleTheme()" title="切换夜间模式">🌙</button>
+    <button class="btn" id="btn-logout" onclick="logout()" style="display:none">退出登录</button>
+  </header>
+
+  <main class="container">
+    <!-- ============ 登录视图 ============ -->
+    <section id="view-login" class="view">
+      <div class="login-card">
+        <h2>登录</h2>
+        <p class="hint" id="login-hint">请输入访问密码</p>
+        <input id="login-password" type="password" placeholder="访问密码" autocomplete="current-password">
+        <button class="btn primary" onclick="doLogin()" id="login-btn">登录</button>
+      </div>
+    </section>
+
+    <!-- ============ API 配置（视图） ============ -->
+    <section id="view-providers" class="view">
+      <h2>AI 服务商</h2>
+      <p class="hint">先添加服务商并「连接」拉取模型列表，再在服务商下「添加模型」——每个模型选类型（文本/视觉二选一）并配置参数，最后点「●」标记设为当前使用。</p>
+      <div id="provider-list" class="card-list"></div>
+
+      <h3 id="provider-form-title">添加服务商</h3>
+      <div class="form-grid">
+        <label>预设（可选）
+          <select id="preset-select">
+            <option value="">自定义</option>
+          </select>
+        </label>
+        <label>名称
+          <input id="p-name" placeholder="如 DeepSeek">
+        </label>
+        <label>Base URL
+          <input id="p-base" placeholder="https://api.deepseek.com/v1">
+        </label>
+        <label>API Key
+          <input id="p-key" type="password" placeholder="sk-...">
+        </label>
+        <label>代理模式
+          <select id="p-proxy">
+            <option value="direct">直连（国内服务商）</option>
+            <option value="system">系统代理（走环境变量）</option>
+            <option value="custom">自定义代理</option>
+          </select>
+        </label>
+        <label>自定义代理地址
+          <input id="p-proxy-url" placeholder="http://127.0.0.1:4780">
+        </label>
+      </div>
+      <button class="btn primary" id="btn-provider-save" onclick="saveProviderForm()">＋ 添加服务商</button>
+      <button class="btn" id="btn-provider-cancel" onclick="cancelEditProvider()" style="display:none">取消编辑</button>
+
+      <h3 style="margin-top:28px">生成参数（全局默认，模型可单独覆盖）</h3>
+      <div class="form-grid">
+        <label>创意度 temperature（0~1.5）
+          <input id="s-temperature" type="number" step="0.1" min="0" max="1.5" value="0.8">
+        </label>
+        <label>字数→token 系数
+          <input id="s-ratio" type="number" step="0.1" min="1" max="3" value="1.6">
+        </label>
+      </div>
+      <button class="btn primary" onclick="saveSettings()">保存生成参数</button>
+    </section>
+
+    <!-- ============ 题材库（视图） ============ -->
+    <section id="view-genres" class="view">
+      <div class="page-head">
+        <h2>题材库</h2>
+        <span class="spacer"></span>
+        <button class="btn" onclick="showGenreForm()">＋ 添加题材</button>
+        <button class="btn" onclick="showGenreImport()">导入题材库</button>
+      </div>
+
+      <!-- 添加/编辑题材表单 -->
+      <div id="genre-form" class="card" style="display:none">
+        <div class="row">
+          <span class="title" id="genre-form-title">添加题材</span>
+          <span class="spacer"></span>
+        </div>
+        <div class="form-grid">
+          <label>题材名称
+            <input id="g-name" placeholder="如 玄幻 / 都市言情 / 悬疑">
+          </label>
+        </div>
+        <label>参考风格
+          <textarea id="g-style" rows="3" placeholder="如：冷峻克制、多短句、白描；或具体风格要求"></textarea>
+        </label>
+        <label>参考文本片段（可选，创作时作为参考原文）
+          <textarea id="g-reference" rows="4" placeholder="粘贴该题材的参考小说片段…"></textarea>
+        </label>
+        <label>题材描述（可选）
+          <textarea id="g-description" rows="2" placeholder="简要说明该题材的特点"></textarea>
+        </label>
+        <div style="margin-top:12px">
+          <button class="btn primary" onclick="saveGenre()">保存</button>
+          <button class="btn" onclick="hideGenreForm()">取消</button>
+        </div>
+      </div>
+
+      <!-- 导入题材库 -->
+      <div id="genre-import" class="card" style="display:none">
+        <div class="row">
+          <span class="title">导入题材库</span>
+          <span class="spacer"></span>
+        </div>
+        <p class="hint">粘贴 JSON 数组导入，格式：<code>[{"name":"题材名","style":"参考风格","reference_text":"参考文本","description":"描述"}, ...]</code></p>
+        <textarea id="g-import-text" rows="8" placeholder='[{"name":"玄幻","style":"热血爽文","reference_text":"","description":"东方玄幻题材"}]'></textarea>
+        <div style="margin-top:12px">
+          <button class="btn primary" onclick="importGenres()">导入</button>
+          <button class="btn" onclick="hideGenreImport()">取消</button>
+        </div>
+      </div>
+
+      <div id="genre-list" class="card-list"></div>
+    </section>
+
+    <!-- ============ 日志（视图） ============ -->
+    <section id="view-logs" class="view">
+      <div class="page-head">
+        <h2>日志</h2>
+        <span class="spacer"></span>
+        <button class="btn" onclick="loadLogs(logPage)">刷新</button>
+        <button class="btn danger" onclick="clearLogs()">清空日志</button>
+      </div>
+      <div id="log-list" class="card-list"></div>
+    </section>
+
+    <!-- ============ 小说列表页（视图） ============ -->
+    <section id="view-novels" class="view">
+      <div class="page-head">
+        <h2>我的小说</h2>
+        <button class="btn primary" onclick="nav('#/novels/new')">＋ 新建小说</button>
+        <button class="btn" onclick="showTrash()">🗑 垃圾箱</button>
+      </div>
+      <div class="filter-bar">
+        <label>排序
+          <select id="novel-sort" onchange="renderNovels()">
+            <option value="created_desc">时间（新→旧）</option>
+            <option value="created_asc">时间（旧→新）</option>
+            <option value="title">标题</option>
+          </select>
+        </label>
+        <label>创作模式
+          <select id="novel-mode-filter" onchange="renderNovels()">
+            <option value="">全部</option>
+            <option value="improv">即兴</option>
+            <option value="outline">大纲</option>
+          </select>
+        </label>
+        <label>模型
+          <select id="novel-model-filter" onchange="renderNovels()">
+            <option value="">全部模型</option>
+          </select>
+        </label>
+        <label>状态
+          <select id="novel-status-filter" onchange="renderNovels()">
+            <option value="">全部状态</option>
+            <option value="draft">草稿</option>
+            <option value="outlined">已生成大纲</option>
+            <option value="generating">生成中</option>
+            <option value="done">已完成</option>
+            <option value="finished">已完结</option>
+          </select>
+        </label>
+        <span class="spacer"></span>
+        <span class="meta" id="novel-count"></span>
+      </div>
+      <div id="novel-list" class="card-list"></div>
+      <div id="novel-pagination" class="pagination"></div>
+    </section>
+
+    <!-- ============ 垃圾箱（视图） ============ -->
+    <section id="view-trash" class="view" style="display:none">
+      <div class="page-head">
+        <a class="back-link" href="#/novels">← 返回小说列表</a>
+        <h2>垃圾箱</h2>
+        <span class="spacer"></span>
+        <button class="btn" onclick="loadTrash()">刷新</button>
+      </div>
+      <div id="trash-list" class="card-list"></div>
+    </section>
+
+    <!-- ============ 创作小说页（视图：基本信息 + 角色设定） ============ -->
+    <section id="view-editor" class="view">
+      <div class="page-head">
+        <a class="back-link" href="#/novels">← 返回小说列表</a>
+        <h2 id="editor-title">新建小说</h2>
+      </div>
+
+      <div class="step-indicator">
+        <span class="step" id="step-dot-1">① 创作模型与提示词</span>
+        <span class="step" id="step-dot-2">② 基本信息</span>
+        <span class="step" id="step-dot-3">③ 角色设定</span>
+      </div>
+
+      <!-- 步骤 1：创作模型 + 全局前置提示词 -->
+      <div id="step-1" class="step-panel">
+        <h3>创作模型与前置提示词</h3>
+        <div class="form-grid">
+          <label>创作模型
+            <select id="n-model"></select>
+          </label>
+        </div>
+        <div class="card global-prompt-card">
+          <span class="title">全局前置提示词</span>
+          <p class="hint">对所有 AI 生成（大纲、章节正文、风格分析、人物照片分析）统一生效的创作指令，例如：全文使用古文对话、避免现代词汇、整体基调偏喜剧等。留空则不加。</p>
+          <textarea id="global-prompt" rows="8" placeholder=""></textarea>
+        </div>
+        <div style="margin-top:16px">
+          <button class="btn primary" onclick="saveGlobalPrompt(); goStep(2)">下一步：基本信息 →</button>
+        </div>
+      </div>
+
+      <!-- 步骤 2：基本信息 -->
+      <div id="step-2" class="step-panel" style="display:none">
+        <h3>基本信息</h3>
+        <div class="form-grid">
+          <label>小说标题
+            <input id="n-title" placeholder="如 长安雪落">
+          </label>
+          <label>题材类型（可下拉选择常用题材，也可直接输入自定义题材）
+            <input id="n-genre" placeholder="如 古言 / 悬疑 / 科幻 / 都市" list="genre-presets">
+            <datalist id="genre-presets"></datalist>
+          </label>
+          <label>从题材库选择（选中后自动填充题材/风格/参考文本）
+            <select id="n-genre-select" onchange="applyGenreTemplate()">
+              <option value="">不使用题材库</option>
+            </select>
+          </label>
+          <label>创作模式
+            <select id="n-mode" onchange="onModeChange()">
+              <option value="outline">大纲式（先生成大纲，再逐章写）</option>
+              <option value="improv">即兴交互式（边写边定，无需大纲）</option>
+            </select>
+          </label>
+          <label>章节数
+            <input id="n-chapters" type="number" min="1" max="200" value="10">
+          </label>
+          <label>每章字数
+            <input id="n-words" type="number" min="200" step="100" value="2000">
+          </label>
+        </div>
+        <label>故事背景（时代/地点/大环境设定）
+          <textarea id="n-background" rows="2" placeholder="如：架空的东方大陆，王朝末年，边关战乱频仍"></textarea>
+        </label>
+        <label>世界观（力量体系/规则/特殊设定）
+          <textarea id="n-worldbuilding" rows="3" placeholder="如：修仙体系分练气/筑基/金丹/元婴，灵气复苏"></textarea>
+        </label>
+        <label>写作风格（留空则用默认流畅叙事）
+          <textarea id="n-style" rows="2" placeholder="如：冷峻克制、多短句、白描，参考鲁迅式笔法"></textarea>
+        </label>
+        <label>参考小说文本（粘贴一段想模仿的小说，生成大纲时自动分析其风格）
+          <textarea id="n-reference" rows="5" placeholder="粘贴参考小说片段…（可选）"></textarea>
+        </label>
+        <div style="margin-top:16px">
+          <button class="btn" onclick="goStep(1)">← 上一步</button>
+          <button class="btn primary" onclick="saveNovelBasics()">下一步：角色设定 →</button>
+        </div>
+      </div>
+
+      <!-- 步骤 3：角色设定 -->
+      <div id="step-3" class="step-panel" style="display:none">
+        <h3>角色设定</h3>
+        <p class="hint">上传人物照片，AI 自动分析外貌与性格；也可手动补充。角色会自动归入本小说。</p>
+        <div class="form-grid char-form-grid">
+          <label>角色姓名
+            <input id="c-name" placeholder="如 林晚晴">
+          </label>
+          <label>照片（可选）
+            <input id="c-photo" type="file" accept="image/*">
+          </label>
+        </div>
+        <div class="char-form-fields">
+          <label>外貌
+            <textarea id="c-appearance" rows="4" placeholder="如：一袭青衫，眉目如画，气质清冷"></textarea>
+          </label>
+          <label>性格
+            <textarea id="c-personality" rows="4" placeholder="如：外冷内热，心思缜密，重情重义"></textarea>
+          </label>
+          <label>背景设定
+            <textarea id="c-background" rows="4" placeholder="如：前朝遗孤，隐姓埋名，背负家族血仇"></textarea>
+          </label>
+          <label>补充
+            <textarea id="c-notes" rows="3" placeholder="其他补充信息（可选）"></textarea>
+          </label>
+        </div>
+        <button class="btn primary" onclick="addCharacter()">＋ 添加角色</button>
+        <div id="character-list" class="card-list" style="margin-top:16px"></div>
+
+        <h4 style="margin-top:20px">人物关系设定</h4>
+        <div id="n-relations" class="relation-list"></div>
+        <button class="btn" onclick="addRelation()">＋ 添加关系</button>
+
+        <div style="margin-top:20px">
+          <button class="btn" onclick="goStep(2)">← 上一步</button>
+          <button class="btn primary" onclick="saveNovelChars()">完成，进入生成 →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 章节生成页（视图） ============ -->
+    <section id="view-generate" class="view">
+      <div class="page-head">
+        <a class="back-link" href="#/novels">← 返回小说列表</a>
+        <a class="back-link" id="gen-edit-link" href="#/novels/edit">← 编辑设定</a>
+        <h2 id="gen-title">章节生成</h2>
+      </div>
+      <div id="workspace"></div>
+    </section>
+
+    <!-- ============ 即兴交互式写作（视图） ============ -->
+    <section id="view-improv" class="view">
+      <div class="page-head">
+        <a class="back-link" href="#/novels">← 返回小说列表</a>
+        <a class="back-link" id="improv-edit-link" href="#/novels/edit">← 编辑设定</a>
+        <h2 id="improv-title">即兴写作</h2>
+      </div>
+      <div class="card improv-input-card">
+        <div class="row">
+          <span class="title">本章写作指引</span>
+          <span class="meta" id="improv-chapter-hint">接下来写第 1 章</span>
+        </div>
+        <p class="hint">告诉 AI 这一章想写什么（情节方向、冲突、转折等），AI 会结合人物设定与前情即时创作，无需提前生成大纲。</p>
+        <textarea id="improv-instruction" rows="3" placeholder="例如：主角在集市上偶遇仇家，被迫卷入一场冲突，最终险胜却暴露了身份。"></textarea>
+        <div id="improv-context-chapters" class="improv-context-list" style="display:none"></div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn primary" id="improv-gen-btn" onclick="generateImprovChapter()">生成本章</button>
+          <span class="spacer"></span>
+          <button class="btn" onclick="nav('#/novels/' + currentNovelId + '/read')" id="improv-read-btn" style="display:none">阅读全文</button>
+        </div>
+      </div>
+      <div id="improv-body"></div>
+    </section>
+
+    <!-- ============ 章节详情/生成页（视图） ============ -->
+    <section id="view-chapter" class="view">
+      <div class="page-head">
+        <a class="back-link" id="chapter-back-link" href="#/novels">← 返回小说</a>
+        <h2 id="chapter-title">章节</h2>
+      </div>
+      <div id="chapter-body"></div>
+    </section>
+
+    <!-- ============ 阅读模式（视图） ============ -->
+    <section id="view-reader" class="view">
+      <div class="reader-toolbar">
+        <a class="back-link" id="reader-back-link" href="#/novels">← 返回</a>
+        <span class="spacer"></span>
+        <button class="btn" onclick="changeReaderFont(-1)" title="减小字号">A−</button>
+        <button class="btn" onclick="changeReaderFont(1)" title="增大字号">A＋</button>
+      </div>
+      <div class="reader-layout">
+        <aside id="reader-toc" class="reader-toc"></aside>
+        <div id="reader-body" class="reader-body"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+
+  <!-- 全屏加载遮罩 -->
+  <div id="loading-overlay" class="loading-overlay">
+    <div class="loading-card">
+      <div class="spinner"></div>
+      <div class="loading-title" id="loading-title">处理中…</div>
+      <div class="loading-sub" id="loading-sub"></div>
+      <div class="loading-bar"><div class="loading-bar-fill" id="loading-bar-fill"></div></div>
+    </div>
+  </div>
+
+  <script src="app.js?v=20260823q"></script>
+</body>
+</html>

@@ -1,0 +1,52 @@
+INFO:     Started server process [66083]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:8001 (Press CTRL+C to quit)
+INFO:     127.0.0.1:63014 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63029 - "POST /api/novels HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:63030 - "POST /api/novels HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:63031 - "POST /api/novels HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:63046 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63046 - "GET /style.css?v=20260823l HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63046 - "GET /app.js?v=20260823q HTTP/1.1" 304 Not Modified
+INFO:     127.0.0.1:63046 - "GET /api/settings HTTP/1.1" 401 Unauthorized
+INFO:     127.0.0.1:63046 - "GET /api/auth/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63047 - "GET /api/auth/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63054 - "POST /api/auth/login HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63054 - "GET /api/settings HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63054 - "GET /api/providers HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63054 - "GET /api/characters HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63054 - "GET /api/genres HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63054 - "GET /api/novels HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63054 - "GET /api/novels HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63056 - "POST /api/novels HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63057 - "POST /api/novels HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63058 - "POST /api/novels HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63055 - "GET /api/novels HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63108 - "DELETE /api/novels/8dcf55af4e8b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63109 - "GET /api/novels/trash HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63117 - "GET /api/novels HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63118 - "POST /api/novels/8dcf55af4e8b/restore HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63119 - "DELETE /api/novels/8dcf55af4e8b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63120 - "DELETE /api/novels/8dcf55af4e8b/destroy HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63167 - "GET /api/novels HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63192 - "GET /api/novels/trash HTTP/1.1" 200 OK
+INFO:     127.0.0.1:63365 - "GET / HTTP/1.0" 200 OK
+INFO:     127.0.0.1:63366 - "GET /style.css?v=20260823l HTTP/1.0" 200 OK
+INFO:     127.0.0.1:63368 - "GET /app.js?v=20260823q HTTP/1.0" 200 OK
+INFO:     127.0.0.1:63372 - "GET /api/settings HTTP/1.0" 401 Unauthorized
+INFO:     127.0.0.1:63375 - "GET /api/auth/status HTTP/1.0" 200 OK
+INFO:     127.0.0.1:63377 - "GET /api/auth/status HTTP/1.0" 200 OK
+INFO:     127.0.0.1:63391 - "POST /api/auth/login HTTP/1.0" 200 OK
+INFO:     127.0.0.1:63392 - "GET /api/settings HTTP/1.0" 200 OK
+INFO:     127.0.0.1:63393 - "GET /api/providers HTTP/1.0" 200 OK
+INFO:     127.0.0.1:63394 - "GET /api/characters HTTP/1.0" 200 OK
+INFO:     127.0.0.1:63395 - "GET /api/genres HTTP/1.0" 200 OK
+INFO:     127.0.0.1:63396 - "GET /api/novels HTTP/1.0" 200 OK
+INFO:     127.0.0.1:63399 - "GET /api/novels HTTP/1.0" 200 OK
+INFO:     127.0.0.1:63434 - "GET /api/novels/trash HTTP/1.0" 200 OK
+INFO:     127.0.0.1:63445 - "GET /api/novels HTTP/1.0" 200 OK
+INFO:     127.0.0.1:63467 - "DELETE /api/novels/6f9ecf4f72d2 HTTP/1.0" 200 OK
+INFO:     127.0.0.1:63468 - "GET /api/novels HTTP/1.0" 200 OK
+INFO:     127.0.0.1:63469 - "GET /api/novels/trash HTTP/1.0" 200 OK
+INFO:     127.0.0.1:63482 - "GET /api/novels HTTP/1.0" 200 OK
