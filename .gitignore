@@ -1,4 +1,6 @@
 .venv/
+.venv.broken/
+server.log
 __pycache__/
 *.pyc
 data/*.json
