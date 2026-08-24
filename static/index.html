@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>织叙-NexTale</title>
-  <link rel="stylesheet" href="style.css?v=20260823l">
+  <link rel="stylesheet" href="style.css?v=20260825f">
 </head>
 <body>
   <header class="topbar">
@@ -248,6 +248,7 @@
             <select id="n-mode" onchange="onModeChange()">
               <option value="outline">大纲式（先生成大纲，再逐章写）</option>
               <option value="improv">即兴交互式（边写边定，无需大纲）</option>
+              <option value="dialog">对话模式（像聊天一样推进剧情）</option>
             </select>
           </label>
           <label>章节数
@@ -349,6 +350,26 @@
       <div id="improv-body"></div>
     </section>
 
+    <!-- ============ 对话模式（视图） ============ -->
+    <section id="view-dialog" class="view">
+      <div class="page-head">
+        <a class="back-link" href="#/novels">← 返回小说列表</a>
+        <a class="back-link" id="dialog-edit-link" href="#/novels/edit">← 编辑设定</a>
+        <h2 id="dialog-title">对话创作</h2>
+      </div>
+      <div class="dialog-layout">
+        <div class="dialog-chat" id="dialog-chat"></div>
+        <div class="dialog-input-bar">
+          <textarea id="dialog-input" rows="2" placeholder="像聊天一样说一句剧情走向，例如：主角推开门，发现来的人竟然是失踪多年的兄长……"></textarea>
+          <button class="btn primary" id="dialog-send-btn" onclick="sendDialogMessage()">发送</button>
+        </div>
+      </div>
+      <div class="dialog-chapters" id="dialog-chapters">
+        <div class="dialog-chapters-title">📚 已生成章节</div>
+        <div id="dialog-chapters-list"></div>
+      </div>
+    </section>
+
     <!-- ============ 章节详情/生成页（视图） ============ -->
     <section id="view-chapter" class="view">
       <div class="page-head">
@@ -385,6 +406,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260823q"></script>
+  <script src="app.js?v=20260825g"></script>
 </body>
 </html>

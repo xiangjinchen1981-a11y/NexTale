@@ -745,3 +745,194 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   color: #fff;
   border-color: var(--accent);
 }
+
+/* ============ 对话模式（IM 聊天式） ============ */
+.dialog-layout {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 180px);
+  min-height: 480px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  overflow: hidden;
+}
+.dialog-chat {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background: var(--subtle-bg, var(--bg));
+}
+.dialog-msg {
+  display: flex;
+  gap: 10px;
+  max-width: 78%;
+}
+.dialog-msg-user { align-self: flex-end; flex-direction: row-reverse; }
+.dialog-msg-ai { align-self: flex-start; }
+.dialog-avatar {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+}
+.dialog-msg-user .dialog-avatar { background: #7c8db5; }
+.dialog-bubble {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 15px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #fff;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+[data-theme="dark"] .dialog-bubble { background: #2a2e38; }
+.dialog-msg-user .dialog-bubble {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.dialog-msg-ai .dialog-bubble { border-top-left-radius: 4px; }
+.dialog-msg-user .dialog-bubble { border-top-right-radius: 4px; }
+.dialog-typing { color: var(--muted); }
+.dialog-bubble.dialog-error { color: #c0392b; border-color: #e74c3c; }
+.dialog-empty {
+  margin: auto;
+  text-align: center;
+  color: var(--muted);
+  max-width: 420px;
+}
+.dialog-empty-icon { font-size: 48px; margin-bottom: 12px; }
+.dialog-empty-title { font-size: 16px; font-weight: 600; margin-bottom: 8px; color: var(--text); }
+.dialog-empty-hint { font-size: 13px; line-height: 1.7; }
+.dialog-input-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--card);
+}
+.dialog-input-bar textarea {
+  flex: 1;
+  resize: none;
+  min-height: 44px;
+  max-height: 120px;
+  padding: 10px 12px;
+  font-size: 15px;
+  line-height: 1.6;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg, #fff);
+  color: var(--text);
+}
+.dialog-input-bar .btn { height: 44px; flex: none; }
+
+/* 对话消息操作按钮 + 编辑 + 章节生成面板 */
+.dialog-bubble-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.dialog-msg-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.dialog-msg-user .dialog-msg-actions { justify-content: flex-end; }
+.dialog-act-btn {
+  padding: 2px 10px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.dialog-act-btn:hover { color: var(--accent); border-color: var(--accent); }
+.dialog-act-btn.primary { color: var(--accent); border-color: var(--accent); }
+.dialog-edit-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 14px;
+  font-size: 15px;
+  line-height: 1.7;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg, #fff);
+  color: var(--text);
+  resize: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.dialog-edit-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+.dialog-chapter-panel {
+  align-self: stretch;
+  margin: 4px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: var(--card);
+}
+
+/* 对话页下方「已生成章节」列表 */
+.dialog-chapters {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+}
+.dialog-chapters-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: var(--text);
+}
+.dialog-chapter-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+.dialog-chapter-item:last-child { border-bottom: none; }
+.dialog-chapter-idx {
+  flex: none;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+}
+.dialog-chapter-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.dialog-act-btn.danger { color: #c0392b; border-color: #e74c3c; }
+.dialog-act-btn.danger:hover { color: #e74c3c; border-color: #e74c3c; }

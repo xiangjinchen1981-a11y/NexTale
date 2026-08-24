@@ -392,7 +392,8 @@ def summarize_chapter_content(context, content, chapter_index, max_retries=2):
     provider, model, mcfg = _resolve(context, "text")
     prompt = (
         f"请用 80~120 字概括下面这段小说第 {chapter_index} 章的核心情节，"
-        "保留关键人物与转折，直接输出摘要：\n\n" + content[-4000:]
+        "保留关键人物与转折。只输出摘要正文本身，"
+        "不要加「摘要：」等任何前缀标题，也不要在末尾标注字数：\n\n" + content[-4000:]
     )
     last_err = None
     for attempt in range(max_retries + 1):
@@ -558,3 +559,145 @@ def _parse_outline(text, chapter_count):
 
 def _count_chinese(text):
     return len(re.findall(r"[\u4e00-\u9fff]", text))
+
+
+# ---------- 节选片段润色 / 扩写 ----------
+
+def _fragment_context(context, novel):
+    """构造片段润色/扩写时的小说设定上下文（人物/风格/世界观/前情提要）。"""
+    chars = _format_characters(context, novel)
+    style = novel.get("style") or "文笔流畅自然，情节紧凑，人物鲜明。"
+    worldbuilding = novel.get("worldbuilding") or "（暂无世界观设定）"
+    prev = _clean_progress(novel.get("progress_summary")) or "（暂无前情）"
+    return {
+        "style": style,
+        "worldbuilding": worldbuilding,
+        "characters": chars,
+        "prev": prev,
+    }
+
+
+def _fragment_prompt(context, novel, chapter_index, text, action):
+    """构造润色 / 扩写 prompt。action: 'polish' | 'expand'。"""
+    info = _fragment_context(context, novel)
+    if action == "polish":
+        task = (
+            "请在保持原意、情节与人物关系不变的前提下，对下面这段小说片段进行润色：\n"
+            "1. 优化措辞与句式，使语言更流畅、更有文学性；\n"
+            "2. 修正语病、逻辑不通与重复啰嗦之处；\n"
+            "3. 保持原有篇幅，不擅自增删情节、不改变人物与设定；\n"
+            "4. 直接输出润色后的完整片段，不要任何解释说明。"
+        )
+    else:
+        task = (
+            "请在保持原有情节走向与人物设定的前提下，对下面这段小说片段进行扩写：\n"
+            "1. 丰富细节：补充动作、神态、心理、环境描写，使画面更生动；\n"
+            "2. 适当延展对话与情节，但不得新增关键角色或改变既定结局；\n"
+            "3. 篇幅扩充到原文的 2~3 倍左右；\n"
+            "4. 直接输出扩写后的完整片段，不要任何解释说明。"
+        )
+    return (
+        f"你是一位小说家，正在处理小说《{novel.get('title') or '未命名'}》第 {chapter_index} 章的片段。\n\n"
+        "【写作风格要求】\n{style}\n\n"
+        "【世界观设定】\n{world}\n\n"
+        "【人物设定】\n{chars}\n\n"
+        "【前情提要】\n{prev}\n\n"
+        "{task}\n\n"
+        "【待处理片段】\n{text}"
+    ).format(style=info["style"], world=info["worldbuilding"],
+             chars=info["characters"], prev=info["prev"], task=task, text=text)
+
+
+def _fragment_stream(context, novel, chapter_index, text, action):
+    """流式生成润色/扩写结果，yield 增量。"""
+    provider, model, mcfg = _resolve(context, "text")
+    prompt = _fragment_prompt(context, novel, chapter_index, text, action)
+    max_tokens = mcfg.get("max_tokens") or max(512, int(len(text) * 1.6 * 2))
+    name = "润色片段" if action == "polish" else "扩写片段"
+    for delta in chat_text_stream(
+            provider, model, _messages(context, prompt),
+            temperature=_temperature(context, mcfg),
+            max_tokens=max_tokens, name=name):
+        yield {"type": "delta", "content": delta}
+
+
+def polish_fragment_stream(context, novel, chapter_index, text):
+    """润色片段（流式）。"""
+    return _fragment_stream(context, novel, chapter_index, text, "polish")
+
+
+def expand_fragment_stream(context, novel, chapter_index, text):
+    """扩写片段（流式）。"""
+    return _fragment_stream(context, novel, chapter_index, text, "expand")
+
+
+# ---------- 对话模式（IM 聊天式推进剧情） ----------
+
+def _format_dialog_history(messages, max_turns=20):
+    """把对话历史格式化为 prompt 文本（只取最近 max_turns 轮，控制长度）。"""
+    if not messages:
+        return "（尚无对话，这是第一轮，请根据设定开启故事。）"
+    recent = messages[-max_turns:]
+    lines = []
+    for m in recent:
+        role = "作者" if m.get("role") == "user" else "AI"
+        lines.append(f"{role}：{m.get('content', '')}")
+    return "\n".join(lines)
+
+
+def _dialog_prompt(context, novel, user_text, history):
+    """构造对话模式的 prompt：每次输出 ≤500 字，以剧情片段推进。"""
+    chars = _format_characters(context, novel)
+    rels = _format_relationships(context, novel)
+    style = novel.get("style") or "文笔流畅自然，情节紧凑，人物鲜明。"
+    worldbuilding = novel.get("worldbuilding") or "（暂无世界观设定）"
+    background = novel.get("background") or "（暂无背景设定）"
+    prev = _clean_progress(novel.get("progress_summary")) or "（暂无前情）"
+    history_text = _format_dialog_history(history)
+
+    return (
+        f"你是一位小说家，正在与作者以「对话」的方式共同创作小说《{novel.get('title') or '未命名'}》。\n"
+        "作者每发一句话，你就以一段小说正文片段回应，双方像 IM 聊天一样交替推进剧情。\n\n"
+        "【题材类型】{genre}\n"
+        "【故事梗概】\n{summary}\n\n"
+        "【故事背景】\n{background}\n\n"
+        "【世界观设定】\n{world}\n\n"
+        "【人物设定】\n{chars}\n\n"
+        "【人物关系】\n{rels}\n\n"
+        "【写作风格要求】\n{style}\n\n"
+        "【前情提要】\n{prev}\n\n"
+        "【已发生的对话】\n{history}\n\n"
+        "【作者本轮发言】\n{user}\n\n"
+        "【本轮要求】\n"
+        "1. 以一段连贯的小说正文片段回应，承接作者发言与前情，推进剧情。\n"
+        "2. 严格控制在 500 字以内（约 300~500 字），只写本轮进展，不要一次性写完整个故事。\n"
+        "3. 遵循人物设定、关系与世界观，不得擅自新增重要角色或改变设定。\n"
+        "4. 直接输出正文片段，不要任何解释、不要标注「AI：」等前缀。"
+    ).format(
+        genre=novel.get("genre") or "不限",
+        summary=novel.get("summary") or "（暂无）",
+        background=background,
+        world=worldbuilding,
+        chars=chars,
+        rels=rels,
+        style=style,
+        prev=prev,
+        history=history_text,
+        user=user_text,
+    )
+
+
+def dialog_stream(context, novel, user_text, history):
+    """对话模式：流式生成一段 ≤500 字的剧情片段。"""
+    provider, model, mcfg = _resolve(context, "text")
+    prompt = _dialog_prompt(context, novel, user_text, history)
+    # 500 字 ≈ 750 token（中文 1 字 ≈ 1.5 token），留足余量
+    max_tokens = mcfg.get("max_tokens") or 900
+    for delta in chat_text_stream(
+            provider, model, _messages(context, prompt),
+            temperature=_temperature(context, mcfg),
+            max_tokens=max_tokens, name="对话推进"):
+        yield {"type": "delta", "content": delta}
+
+
+

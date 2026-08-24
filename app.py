@@ -525,6 +525,7 @@ def create_novel(body: dict):
         "status": "draft",
         "text_model_id": body.get("text_model_id", "").strip(),
         "mode": body.get("mode", "outline"),
+        "dialog_messages": [],
         "created_at": time.time(),
     }
     novels.append(n)
@@ -1041,6 +1042,263 @@ async def improv_stream(nid: str, body: dict):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
     )
+
+
+@app.post("/api/novels/{nid}/chapter/{index}/polish")
+async def polish_fragment(nid: str, index: int, body: dict):
+    """润色章节中的节选片段（SSE 流式）。body: {text}。"""
+    return _fragment_sse(nid, index, body, "polish")
+
+
+@app.post("/api/novels/{nid}/chapter/{index}/expand")
+async def expand_fragment(nid: str, index: int, body: dict):
+    """扩写章节中的节选片段（SSE 流式）。body: {text}。"""
+    return _fragment_sse(nid, index, body, "expand")
+
+
+def _fragment_sse(nid: str, index: int, body: dict, action: str):
+    """润色/扩写片段的通用 SSE 处理。"""
+    n = storage.get_novel(nid)
+    if not n:
+        raise HTTPException(404, "小说不存在")
+    _ensure_not_finished(n)
+    text = (body or {}).get("text", "").strip()
+    if not text:
+        raise HTTPException(400, "请先选中要处理的文字片段")
+    if len(text) < 10:
+        raise HTTPException(400, "片段过短（至少 10 字），请选中更完整的文字")
+    chapters = n.get("chapters", [])
+    if index < 1 or index > len(chapters):
+        raise HTTPException(400, f"章节序号越界（1~{len(chapters)}）")
+    ctx = _ctx(n)
+
+    stream_fn = (generators.polish_fragment_stream if action == "polish"
+                 else generators.expand_fragment_stream)
+
+    def sse(event: dict) -> str:
+        return "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+
+    q: queue.Queue = queue.Queue(maxsize=1024)
+    loop = asyncio.get_running_loop()
+    stream_error: dict = {}
+
+    def _producer():
+        try:
+            for event in stream_fn(ctx, n, index, text):
+                q.put(event)
+            q.put(None)
+        except Exception as e:  # noqa: BLE001
+            stream_error["err"] = e
+            q.put(None)
+
+    threading.Thread(target=_producer, daemon=True).start()
+
+    async def gen():
+        try:
+            while True:
+                item = await loop.run_in_executor(None, q.get)
+                if item is None:
+                    break
+                yield sse(item)
+                await asyncio.sleep(0)
+            if "err" in stream_error:
+                yield sse({"type": "error", "message": str(_err(stream_error["err"]).detail)})
+            else:
+                yield sse({"type": "done"})
+        except Exception as e:  # noqa: BLE001
+            yield sse({"type": "error", "message": str(_err(e).detail)})
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
+
+
+@app.post("/api/novels/{nid}/dialog/stream")
+async def dialog_stream(nid: str, body: dict):
+    """对话模式：作者发言 → AI 流式返回一段 ≤500 字的剧情片段（SSE）。
+
+    body:
+      text    作者本轮发言（必填）
+      history 可选，编辑重生成时前端传入的对话历史（截断到编辑点）。
+              省略时默认读取 novel.dialog_messages。
+
+    重生成场景：前端把历史截断到被编辑消息之前，把编辑后的内容作为 text 传入，
+    后端用新历史生成，并在保存时替换（而非追加）该历史之后的旧消息。
+    """
+    n = storage.get_novel(nid)
+    if not n:
+        raise HTTPException(404, "小说不存在")
+    _ensure_not_finished(n)
+    user_text = (body or {}).get("text", "").strip()
+    if not user_text:
+        raise HTTPException(400, "请先输入内容")
+    ctx = _ctx(n)
+    history = (body or {}).get("history")
+    if history is None:
+        history = n.get("dialog_messages", []) or []
+    elif not isinstance(history, list):
+        history = []
+
+    def sse(event: dict) -> str:
+        return "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+
+    q: queue.Queue = queue.Queue(maxsize=1024)
+    loop = asyncio.get_running_loop()
+    stream_error: dict = {}
+    result: dict = {"content": ""}
+
+    def _producer():
+        try:
+            for event in generators.dialog_stream(ctx, n, user_text, history):
+                if event["type"] == "delta":
+                    result["content"] += event["content"]
+                q.put(event)
+            q.put(None)
+        except Exception as e:  # noqa: BLE001
+            stream_error["err"] = e
+            q.put(None)
+
+    threading.Thread(target=_producer, daemon=True).start()
+
+    async def gen():
+        try:
+            while True:
+                item = await loop.run_in_executor(None, q.get)
+                if item is None:
+                    break
+                yield sse(item)
+                await asyncio.sleep(0)
+
+            if "err" in stream_error:
+                yield sse({"type": "error", "message": str(_err(stream_error["err"]).detail)})
+                return
+
+            content = result["content"].strip()
+            if content:
+                # 用「传入历史 + 本轮」作为新的完整历史（重生成场景自动截断旧消息）
+                def mut(m):
+                    msgs = list(history)
+                    msgs.append({"role": "user", "content": user_text})
+                    msgs.append({"role": "assistant", "content": content})
+                    # 控制历史长度，避免无限膨胀（保留最近 200 条）
+                    m["dialog_messages"] = msgs[-200:]
+                    m["status"] = "generating"
+                storage.update_novel(nid, mut)
+
+            yield sse({"type": "done", "content": content})
+        except Exception as e:  # noqa: BLE001
+            yield sse({"type": "error", "message": str(_err(e).detail)})
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
+
+
+@app.post("/api/novels/{nid}/dialog/update")
+def update_dialog_message(nid: str, body: dict):
+    """直接更新某条对话消息内容（不触发 AI 重新生成）。
+
+    body: {index, content}  index 从 0 起。
+    """
+    n = storage.get_novel(nid)
+    if not n:
+        raise HTTPException(404, "小说不存在")
+    _ensure_not_finished(n)
+    index = (body or {}).get("index")
+    content = (body or {}).get("content", "")
+    try:
+        index = int(index)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "缺少有效的消息索引")
+    msgs = n.get("dialog_messages", []) or []
+    if index < 0 or index >= len(msgs):
+        raise HTTPException(400, "消息索引越界")
+    if not content.strip():
+        raise HTTPException(400, "内容不能为空")
+
+    def mut(m):
+        ms = m.get("dialog_messages", []) or []
+        if index < len(ms):
+            ms[index]["content"] = content.strip()
+        m["dialog_messages"] = ms
+
+    storage.update_novel(nid, mut)
+    return {"novel": storage.get_novel(nid)}
+
+
+@app.post("/api/novels/{nid}/dialog/chapter")
+async def dialog_to_chapter(nid: str, body: dict):
+    """把某次对话（含该消息之前的全部 AI 输出）合并成正式章节并保存。
+
+    正文不重新生成——直接把之前的 AI 输出内容按顺序合并；
+    摘要通过 AI 提取（仅摘要调用 AI，正文不调用）。
+
+    body:
+      up_to  结束索引（从 0 起，含该消息），取前 up_to+1 条消息中的 AI 内容。
+      title  可选章节标题，缺省用「第N章」。
+    """
+    n = storage.get_novel(nid)
+    if not n:
+        raise HTTPException(404, "小说不存在")
+    _ensure_not_finished(n)
+    history = n.get("dialog_messages", []) or []
+    up_to = (body or {}).get("up_to")
+    try:
+        up_to = int(up_to)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "缺少有效的消息索引")
+    if up_to < 0 or up_to >= len(history):
+        raise HTTPException(400, "消息索引越界")
+    title = (body or {}).get("title", "").strip()
+
+    selected = history[:up_to + 1]
+    # 直接合并所有 AI 输出内容（role == assistant），不调用 AI 重新生成正文
+    ai_parts = [m.get("content", "").strip()
+                for m in selected if m.get("role") == "assistant" and m.get("content", "").strip()]
+    content = "\n\n".join(ai_parts)
+    if not content:
+        raise HTTPException(400, "该段对话还没有 AI 生成的内容，无法生成章节")
+
+    ctx = _ctx(n)
+    chapter_index = len(n.get("chapters", [])) + 1
+
+    # 提取摘要（仅此步调用 AI）
+    summary = ""
+    try:
+        summary = generators.summarize_chapter_content(ctx, content, chapter_index)
+        # 清理模型可能附加的前缀（如「**摘要：**」「**第N章核心情节摘要：**」）与末尾字数标注
+        import re as _re
+        summary = _re.sub(r"^[\*\#\s]*[^\n]{0,20}?摘要[:：]?[\*\#\s]*", "", summary)
+        summary = _re.sub(r"（共?\s*\d+\s*字）\s*$", "", summary).strip()
+    except AIClientError:
+        summary = ""  # 摘要失败不阻断章节保存
+
+    chapter = {
+        "index": chapter_index,
+        "title": title or f"第{chapter_index}章",
+        "summary": summary or "",
+        "content": content,
+        "word_count": generators._count_chinese(content),
+    }
+
+    def mut(m):
+        m.setdefault("chapters", []).append(chapter)
+        # 删除已合并的对话消息（up_to 及之前），后续合并只针对剩余新消息
+        m["dialog_messages"] = history[up_to + 1:]
+        # 同步前情提要
+        if summary:
+            m["progress_summary"] = generators.replace_progress_entry(
+                m.get("progress_summary", ""), chapter_index, summary)
+        m["status"] = "generating"
+
+    storage.update_novel(nid, mut)
+
+    return {"chapter_index": chapter_index, "title": chapter["title"],
+            "content": content, "summary": summary, "word_count": chapter["word_count"]}
 
 
 @app.get("/api/novels/{nid}/export")

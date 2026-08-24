@@ -61,7 +61,14 @@ async function api(path, opts = {}) {
     throw new Error((data && data.detail) ? data.detail : '未登录或登录已过期');
   }
   if (!res.ok) {
-    const msg = (data && data.detail) ? data.detail : `请求失败(${res.status})`;
+    let detail = data && data.detail;
+    // FastAPI 422 校验错误时 detail 是数组对象，需提取可读信息，避免显示 [object Object]
+    if (Array.isArray(detail)) {
+      detail = detail.map(x => x && x.msg ? x.msg : JSON.stringify(x)).join('；');
+    } else if (detail && typeof detail === 'object') {
+      detail = detail.message || JSON.stringify(detail);
+    }
+    const msg = detail ? String(detail) : `请求失败(${res.status})`;
     throw new Error(msg);
   }
   return data;
@@ -187,8 +194,8 @@ function maskKey(k) {
 }
 
 // ============ 视图 / 路由 ============
-// 视图列表：login（登录）、providers（API配置）、genres（题材库）、novels（列表）、trash（垃圾箱）、editor（创作）、generate（生成）、chapter（章节详情）、reader（阅读）、improv（即兴写作）、logs（请求日志）
-const VIEWS = ['login', 'providers', 'genres', 'novels', 'trash', 'editor', 'generate', 'chapter', 'reader', 'improv', 'logs'];
+// 视图列表：login（登录）、providers（API配置）、genres（题材库）、novels（列表）、trash（垃圾箱）、editor（创作）、generate（生成）、chapter（章节详情）、reader（阅读）、improv（即兴写作）、dialog（对话模式）、logs（请求日志）
+const VIEWS = ['login', 'providers', 'genres', 'novels', 'trash', 'editor', 'generate', 'chapter', 'reader', 'improv', 'dialog', 'logs'];
 
 // 当前小说 id（用于创作/生成页定位）
 let currentNovelId = null;
@@ -312,6 +319,13 @@ async function router() {
     // 即兴交互式写作：#/novels/:id/improv
     showView('improv');
     await openImprovPage(id);
+    return;
+  }
+
+  if (sub === 'dialog') {
+    // 对话模式：#/novels/:id/dialog
+    showView('dialog');
+    await openDialogPage(id);
     return;
   }
 
@@ -871,28 +885,37 @@ function statusLabel(s) {
 let novelPage = 1;
 const NOVEL_PAGE_SIZE = 5;
 
+// 创作模式显示名
+function modeLabel(m) {
+  return { 'outline': '大纲', 'improv': '即兴', 'dialog': '对话' }[m] || '大纲';
+}
+
 // 渲染一个小说卡片（供列表与垃圾箱复用）
 function novelCardHTML(n) {
   const isImprov = n.mode === 'improv';
+  const isDialog = n.mode === 'dialog';
   const hasOutline = n.chapters && n.chapters.length;
   const genCount = (n.chapters || []).filter(c => c.content).length;
   const isFinished = n.status === 'finished';
   const created = n.created_at ? new Date(n.created_at * 1000).toLocaleString('zh-CN', { hour12: false }) : '';
   let primaryBtn;
-  if (isImprov) {
+  if (isDialog) {
+    primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/dialog')">进入对话</button>`;
+  } else if (isImprov) {
     primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/improv')">进入写作（${genCount} 章）</button>`;
   } else if (hasOutline) {
     primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/generate')">进入生成（${genCount}/${n.chapter_count}）</button>`;
   } else {
     primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/edit')">继续创作</button>`;
   }
+  const modeBadge = `<span class="badge">${modeLabel(n.mode)}</span>`;
   if (isFinished) {
     return `
     <div class="card novel-card">
       <div class="row">
         <span class="title">${esc(n.title)}</span>
         <span class="badge">${esc(statusLabel(n.status))}</span>
-        <span class="badge">${isImprov ? '即兴' : '大纲'}</span>
+        ${modeBadge}
         <span class="spacer"></span>
         ${created ? `<span class="meta">${esc(created)}</span>` : ''}
       </div>
@@ -911,7 +934,7 @@ function novelCardHTML(n) {
     <div class="row">
       <span class="title">${esc(n.title)}</span>
       <span class="badge">${esc(statusLabel(n.status))}</span>
-      <span class="badge">${isImprov ? '即兴' : '大纲'}</span>
+      ${modeBadge}
       <span class="spacer"></span>
       ${created ? `<span class="meta">${esc(created)}</span>` : ''}
     </div>
@@ -1123,12 +1146,12 @@ function newNovel() {
   window.scrollTo({ top: 0 });
 }
 
-// 创作模式切换：即兴交互式不需要章节数
+// 创作模式切换：即兴交互式、对话模式不需要预设章节数
 function onModeChange() {
   const mode = $('n-mode') ? $('n-mode').value : 'outline';
   const chaptersLabel = $('n-chapters').closest('label');
   if (chaptersLabel) {
-    chaptersLabel.style.display = mode === 'improv' ? 'none' : '';
+    chaptersLabel.style.display = (mode === 'improv' || mode === 'dialog') ? 'none' : '';
   }
 }
 
@@ -1199,9 +1222,11 @@ async function saveNovelChars() {
     state.novel = d.novel;
     toast('角色设定已保存', 'ok');
     loadNovels();
-    // 根据创作模式跳转：即兴交互式 → 即兴写作页；大纲式 → 章节生成页
+    // 根据创作模式跳转：即兴 → 即兴写作页；对话 → 对话页；大纲 → 章节生成页
     if (state.novel.mode === 'improv') {
       nav('#/novels/' + state.novel.id + '/improv');
+    } else if (state.novel.mode === 'dialog') {
+      nav('#/novels/' + state.novel.id + '/dialog');
     } else {
       nav('#/novels/' + state.novel.id + '/generate');
     }
@@ -1277,8 +1302,9 @@ async function openChapterPage(id, index) {
     }
     const backLink = $('chapter-back-link');
     if (backLink) {
-      // 根据创作模式决定返回目标：即兴模式 → 即兴写作页，大纲模式 → 生成页
-      const backTarget = state.novel.mode === 'improv' ? '/improv' : '/generate';
+      // 根据创作模式决定返回目标：即兴 → 即兴写作页，对话 → 对话页，大纲 → 生成页
+      const backTarget = state.novel.mode === 'improv' ? '/improv'
+        : state.novel.mode === 'dialog' ? '/dialog' : '/generate';
       backLink.setAttribute('href', '#/novels/' + id + backTarget);
     }
     chapterEditing = null;  // 切换到章节页时重置编辑状态
@@ -1462,6 +1488,361 @@ async function generateImprovChapter() {
   toast('本章完成', 'ok');
 }
 
+// ============ 对话模式（IM 聊天式推进剧情） ============
+let dialogSending = false;  // 是否正在等待 AI 回复（防止重复发送）
+
+async function openDialogPage(id) {
+  try {
+    const d = await api('/api/novels/' + id);
+    state.novel = d.novel;
+    currentNovelId = id;
+    $('dialog-title').textContent = '《' + (state.novel.title || '未命名') + '》 对话创作';
+    const editLink = $('dialog-edit-link');
+    if (editLink) editLink.setAttribute('href', '#/novels/' + id + '/edit');
+    renderDialog();
+    window.scrollTo({ top: 0 });
+  } catch (e) {
+    toast(e.message, 'err');
+    nav('#/novels');
+  }
+}
+
+// 渲染对话页下方的「已生成章节」列表（可查看/编辑/删除）
+function renderDialogChapters() {
+  const box = $('dialog-chapters-list');
+  const wrap = $('dialog-chapters');
+  if (!box || !wrap) return;
+  const chs = (state.novel && state.novel.chapters) || [];
+  if (!chs.length) {
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = 'block';
+  box.innerHTML = chs.map(ch => `
+    <div class="dialog-chapter-item">
+      <span class="dialog-chapter-idx">第${ch.index}章</span>
+      <span class="dialog-chapter-name">${esc(ch.title || '')}</span>
+      <span class="meta">${ch.word_count || 0} 字</span>
+      <span class="spacer"></span>
+      <button class="dialog-act-btn" onclick="nav('#/novels/${state.novel.id}/chapter/${ch.index}')">查看/编辑</button>
+      <button class="dialog-act-btn danger" onclick="deleteDialogChapter(${ch.index})">删除</button>
+    </div>`).join('');
+}
+
+// 删除对话模式生成的章节
+async function deleteDialogChapter(index) {
+  if (!confirm(`确定删除第 ${index} 章？此操作不可恢复。`)) return;
+  try {
+    const d = await api(`/api/novels/${state.novel.id}/chapter/${index}`, { method: 'DELETE' });
+    state.novel = d.novel;
+    renderDialogChapters();
+    toast('章节已删除', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// 渲染对话历史（IM 气泡样式，每条消息带操作按钮）
+function renderDialog() {
+  const chat = $('dialog-chat');
+  if (!chat) return;
+  // 先渲染已生成章节列表（无论对话是否为空都要展示）
+  renderDialogChapters();
+  const msgs = (state.novel && state.novel.dialog_messages) || [];
+  if (!msgs.length) {
+    chat.innerHTML = `
+      <div class="dialog-empty">
+        <div class="dialog-empty-icon">💬</div>
+        <div class="dialog-empty-title">开始对话式创作</div>
+        <div class="dialog-empty-hint">在下方输入一句话，告诉 AI 剧情走向（例如场景、人物动作、冲突），AI 会以一段不超过 500 字的正文回应，像聊天一样推进故事。</div>
+      </div>`;
+    return;
+  }
+  chat.innerHTML = msgs.map((m, idx) => {
+    const isUser = m.role === 'user';
+    // 每条消息的操作按钮：编辑 + （AI 消息）生成章节
+    const actions = `
+      <div class="dialog-msg-actions">
+        <button class="dialog-act-btn" onclick="editDialogMessage(${idx})">编辑</button>
+        ${!isUser ? `<button class="dialog-act-btn" onclick="dialogToChapter(${idx})">生成章节</button>` : ''}
+      </div>`;
+    return `
+      <div class="dialog-msg ${isUser ? 'dialog-msg-user' : 'dialog-msg-ai'}" data-idx="${idx}">
+        <div class="dialog-avatar">${isUser ? '我' : 'AI'}</div>
+        <div class="dialog-bubble-wrap">
+          <div class="dialog-bubble" id="dialog-bubble-${idx}">${esc(m.content)}</div>
+          ${actions}
+        </div>
+      </div>`;
+  }).join('');
+  chat.scrollTop = chat.scrollHeight;
+}
+
+// 编辑某条消息：气泡变成文本框，提供「保存并重新生成」「取消」
+function editDialogMessage(idx) {
+  const msgs = (state.novel && state.novel.dialog_messages) || [];
+  const m = msgs[idx];
+  if (!m) return;
+  const wrap = document.querySelector(`.dialog-msg[data-idx="${idx}"] .dialog-bubble-wrap`);
+  if (!wrap) return;
+  const isUser = m.role === 'user';
+  // 记录原气泡宽度，让编辑框与气泡等宽（避免换成 textarea 后收缩）
+  const bubbleEl = wrap.querySelector('.dialog-bubble');
+  const bubbleWidth = bubbleEl ? Math.round(bubbleEl.getBoundingClientRect().width) : 0;
+  wrap.innerHTML = `
+    <textarea class="dialog-edit-textarea" id="dialog-edit-${idx}">${esc(m.content)}</textarea>
+    <div class="dialog-msg-actions">
+      <button class="dialog-act-btn primary" onclick="saveDialogEdit(${idx})">${isUser ? '保存并重新生成' : '保存修改'}</button>
+      <button class="dialog-act-btn" onclick="renderDialog()">取消</button>
+    </div>
+    ${isUser ? '<div class="dialog-edit-hint">保存后将截断此消息之后的对话，并重新生成 AI 回复。</div>'
+             : '<div class="dialog-edit-hint">仅修改这段 AI 返回的内容，不会重新调用 AI。</div>'}
+  `;
+  const ta = $('dialog-edit-' + idx);
+  if (ta) {
+    if (bubbleWidth > 0) ta.style.minWidth = bubbleWidth + 'px';
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    autoResizeTextarea(ta);
+    ta.addEventListener('input', () => autoResizeTextarea(ta));
+  }
+}
+
+// 让 textarea 高度随内容行数自适应（与气泡等宽，行数变化自动增高）
+function autoResizeTextarea(ta) {
+  ta.style.height = 'auto';
+  ta.style.height = (ta.scrollHeight + 2) + 'px';
+}
+
+// 保存编辑：
+// - 编辑 AI 消息：直接更新内容，不请求 AI 重新生成（用户修复 AI 返回的正文）
+// - 编辑用户消息：截断历史到该消息，重新请求 AI 生成回复
+async function saveDialogEdit(idx) {
+  if (dialogSending) return;
+  const ta = $('dialog-edit-' + idx);
+  if (!ta) return;
+  const newText = ta.value.trim();
+  if (!newText) return toast('内容不能为空', 'err');
+
+  const msgs = (state.novel && state.novel.dialog_messages) || [];
+  const m = msgs[idx];
+  if (!m) return;
+  const isUser = m.role === 'user';
+
+  // 编辑 AI 消息：直接更新，不调 AI
+  if (!isUser) {
+    try {
+      const d = await api(`/api/novels/${state.novel.id}/dialog/update`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ index: idx, content: newText }),
+      });
+      state.novel = d.novel;
+      renderDialog();
+      toast('内容已更新', 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+    return;
+  }
+
+  // 编辑用户消息：重新生成 AI 回复
+  // 截断历史到该消息之前（不含该消息）
+  const prefix = msgs.slice(0, idx);
+
+  dialogSending = true;
+  const btn = $('dialog-send-btn');
+  btn.disabled = true;
+  btn.textContent = '重新生成中…';
+
+  const chat = $('dialog-chat');
+  // 移除该消息及其之后的所有消息
+  chat.querySelectorAll('.dialog-msg').forEach(el => {
+    if (parseInt(el.dataset.idx, 10) >= idx) el.remove();
+  });
+
+  // 追加显示用户消息（编辑后的内容）
+  chat.insertAdjacentHTML('beforeend', `
+    <div class="dialog-msg dialog-msg-user">
+      <div class="dialog-avatar">我</div>
+      <div class="dialog-bubble-wrap"><div class="dialog-bubble">${esc(newText)}</div></div>
+    </div>`);
+
+  // AI 气泡（流式填充）
+  const aiId = 'dialog-ai-' + Date.now();
+  chat.insertAdjacentHTML('beforeend', `
+    <div class="dialog-msg dialog-msg-ai" id="${aiId}">
+      <div class="dialog-avatar">AI</div>
+      <div class="dialog-bubble-wrap"><div class="dialog-bubble" id="${aiId}-bubble"><span class="dialog-typing">正在思考…</span></div></div>
+    </div>`);
+  const bubble = $(aiId + '-bubble');
+  chat.scrollTop = chat.scrollHeight;
+
+  let full = '';
+  try {
+    await streamApi(`/api/novels/${state.novel.id}/dialog/stream`, (ev) => {
+      if (ev.type === 'delta') {
+        full += ev.content;
+        if (bubble) bubble.textContent = full;
+        chat.scrollTop = chat.scrollHeight;
+      } else if (ev.type === 'done') {
+        if (ev.content && bubble && !full.trim()) bubble.textContent = ev.content;
+      } else if (ev.type === 'error') {
+        throw new Error(ev.message);
+      }
+    }, { text: newText, history: prefix });
+
+    if (!full.trim()) throw new Error('模型未返回内容，请重试');
+    // 更新本地 state：前缀 + 新 user + 新 AI
+    state.novel.dialog_messages = prefix.concat([
+      { role: 'user', content: newText },
+      { role: 'assistant', content: full.trim() },
+    ]);
+    renderDialog();
+    toast('已重新生成', 'ok');
+  } catch (e) {
+    if (bubble) { bubble.textContent = '⚠️ ' + e.message; bubble.classList.add('dialog-error'); }
+    toast(e.message, 'err');
+  } finally {
+    dialogSending = false;
+    btn.disabled = false;
+    btn.textContent = '发送';
+  }
+}
+
+// 在某次 AI 消息后输出章节（直接合并之前的 AI 输出，不重新生成正文，仅提取摘要）
+async function dialogToChapter(idx) {
+  if (dialogSending) return;
+  if (!confirm('将把到目前为止的 AI 输出（含本条）直接合并成一个章节，确定继续？')) return;
+
+  const msgs = (state.novel && state.novel.dialog_messages) || [];
+  if (idx < 0 || idx >= msgs.length) return toast('消息索引无效', 'err');
+
+  dialogSending = true;
+  const btn = $('dialog-send-btn');
+  btn.disabled = true;
+  btn.textContent = '生成中…';
+
+  const chat = $('dialog-chat');
+  // 插入章节生成面板
+  const panelId = 'dialog-chapter-' + Date.now();
+  chat.insertAdjacentHTML('beforeend', `
+    <div class="dialog-chapter-panel" id="${panelId}">
+      <div class="row">
+        <span class="title">正在合并并提取摘要…</span>
+        <span class="badge gen-badge">生成中…</span>
+      </div>
+      <div class="gen-output" id="${panelId}-out"></div>
+    </div>`);
+  const out = $(panelId + '-out');
+  chat.scrollTop = chat.scrollHeight;
+
+  try {
+    const d = await api(`/api/novels/${state.novel.id}/dialog/chapter`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ up_to: idx }),
+    });
+
+    const chapterIndex = d.chapter_index;
+    // 展示合并后的章节正文
+    if (out) {
+      out.textContent = d.content;
+      out.scrollTop = out.scrollHeight;
+    }
+    // 后端已删除已合并的对话消息，重新拉取 novel 以同步 state
+    const fresh = await api('/api/novels/' + state.novel.id);
+    state.novel = fresh.novel;
+    // 重新渲染：对话区（已合并消息消失）+ 章节列表
+    renderDialog();
+    loadNovels();
+    toast(`第 ${chapterIndex} 章已生成（${d.word_count} 字）`, 'ok');
+    if (out) {
+      const titleEl = panelId && document.querySelector(`#${panelId} .title`);
+      if (titleEl) titleEl.textContent = `第 ${chapterIndex} 章 · ${d.title || ''}（${d.word_count} 字）`;
+    }
+  } catch (e) {
+    if (out) { out.textContent = '⚠️ ' + e.message; out.classList.add('gen-error'); }
+    toast(e.message, 'err');
+  } finally {
+    dialogSending = false;
+    btn.disabled = false;
+    btn.textContent = '发送';
+  }
+}
+
+// 发送对话消息
+async function sendDialogMessage() {
+  if (dialogSending) return;
+  const input = $('dialog-input');
+  const text = input.value.trim();
+  if (!text) return toast('请先输入内容', 'err');
+
+  dialogSending = true;
+  const btn = $('dialog-send-btn');
+  btn.disabled = true;
+  btn.textContent = '回复中…';
+  input.disabled = true;
+
+  // 立即在聊天区显示用户消息
+  const chat = $('dialog-chat');
+  const emptyEl = chat.querySelector('.dialog-empty');
+  if (emptyEl) emptyEl.remove();
+  chat.insertAdjacentHTML('beforeend', `
+    <div class="dialog-msg dialog-msg-user">
+      <div class="dialog-avatar">我</div>
+      <div class="dialog-bubble-wrap"><div class="dialog-bubble">${esc(text)}</div></div>
+    </div>`);
+
+  // AI 气泡（流式填充）
+  const aiId = 'dialog-ai-' + Date.now();
+  chat.insertAdjacentHTML('beforeend', `
+    <div class="dialog-msg dialog-msg-ai" id="${aiId}">
+      <div class="dialog-avatar">AI</div>
+      <div class="dialog-bubble-wrap"><div class="dialog-bubble" id="${aiId}-bubble"><span class="dialog-typing">正在思考…</span></div></div>
+    </div>`);
+  const bubble = $(aiId + '-bubble');
+  chat.scrollTop = chat.scrollHeight;
+
+  let full = '';
+  try {
+    await streamApi(`/api/novels/${state.novel.id}/dialog/stream`, (ev) => {
+      if (ev.type === 'delta') {
+        full += ev.content;
+        if (bubble) bubble.textContent = full;
+        chat.scrollTop = chat.scrollHeight;
+      } else if (ev.type === 'done') {
+        if (ev.content && bubble && !full.trim()) bubble.textContent = ev.content;
+      } else if (ev.type === 'error') {
+        throw new Error(ev.message);
+      }
+    }, { text });
+
+    if (!full.trim()) throw new Error('模型未返回内容，请重试');
+    // 更新 state 中的对话历史（供下次渲染）
+    const msgs = (state.novel.dialog_messages || []);
+    state.novel.dialog_messages = msgs.concat([
+      { role: 'user', content: text },
+      { role: 'assistant', content: full.trim() },
+    ]);
+    input.value = '';
+    // 重新渲染，让每条消息（含新 AI 消息）都带上「编辑」「生成章节」按钮
+    renderDialog();
+  } catch (e) {
+    if (bubble) { bubble.textContent = '⚠️ ' + e.message; bubble.classList.add('dialog-error'); }
+    toast(e.message, 'err');
+  } finally {
+    dialogSending = false;
+    btn.disabled = false;
+    btn.textContent = '发送';
+    input.disabled = false;
+    input.focus();
+    chat.scrollTop = chat.scrollHeight;
+  }
+}
+
+// 对话模式输入框：回车发送，Shift+回车换行
+document.addEventListener('keydown', (e) => {
+  if (e.target && e.target.id === 'dialog-input' && e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendDialogMessage();
+  }
+});
+
 // ============ 阅读模式 ============
 let readerFontSize = 18;  // 阅读正文字号（px）
 
@@ -1614,7 +1995,11 @@ function renderChapterPage(index) {
     html += `<div style="margin:8px 0 16px">
       <button class="btn primary" onclick="saveChapterEdit(${index})">保存修改</button>
       <button class="btn" onclick="cancelChapterEdit(${index})">取消</button>
-    </div>`;
+      <span class="spacer"></span>
+      <button class="btn" id="polish-frag-btn" onclick="polishFragment(${index})">✨ 润色选中片段</button>
+      <button class="btn" id="expand-frag-btn" onclick="expandFragment(${index})">📝 扩写选中片段</button>
+    </div>
+    <div id="frag-panel" style="display:none; margin:8px 0 16px"></div>`;
   } else {
     // 即兴模式：提供写作指引输入框，预填上一次的指引，作者可继续使用或修改后重新生成
     if (n.mode === 'improv') {
@@ -1687,6 +2072,100 @@ async function saveChapterEdit(index) {
     loadNovels();
     toast('章节已保存', 'ok');
   } catch (e) { toast(e.message, 'err'); }
+}
+
+// ============ 节选片段润色 / 扩写 ============
+// 获取编辑正文文本框中选中的文字；未选中时给出提示
+function getSelectedFragment() {
+  const ta = $('ce-content');
+  if (!ta) { toast('请先进入编辑模式', 'err'); return null; }
+  const start = ta.selectionStart, end = ta.selectionEnd;
+  if (start === end) {
+    toast('请先在正文中选中要处理的文字片段', 'err');
+    return null;
+  }
+  const text = ta.value.substring(start, end).trim();
+  if (!text) { toast('选中内容为空，请重新选择', 'err'); return null; }
+  if (text.length < 10) { toast('片段过短（至少 10 字），请选中更完整的文字', 'err'); return null; }
+  return { text, start, end, ta };
+}
+
+// 润色 / 扩写的通用处理：流式获取结果，替换回选中位置
+async function runFragmentAction(index, action) {
+  const sel = getSelectedFragment();
+  if (!sel) return;
+  const { text, start, end, ta } = sel;
+  const panel = $('frag-panel');
+  const btn = $(action === 'polish' ? 'polish-frag-btn' : 'expand-frag-btn');
+  const label = action === 'polish' ? '润色' : '扩写';
+  if (!panel) return;
+
+  panel.style.display = 'block';
+  panel.innerHTML = `
+    <div class="card gen-panel">
+      <div class="row">
+        <span class="title">片段${label}中</span>
+        <span class="badge gen-badge" id="frag-badge">生成中…</span>
+      </div>
+      <div class="gen-output" id="frag-out"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary" id="frag-apply-btn" disabled onclick="applyFragment(${index}, ${start}, ${end})">替换到正文</button>
+        <button class="btn" onclick="cancelFragment()">取消</button>
+      </div>
+    </div>`;
+  const out = $('frag-out'), badge = $('frag-badge');
+  if (btn) btn.disabled = true;
+
+  let full = '';
+  try {
+    await streamApi(`/api/novels/${state.novel.id}/chapter/${index}/${action}`, (ev) => {
+      if (ev.type === 'delta') {
+        full += ev.content;
+        if (out) { out.textContent = full; out.scrollTop = out.scrollHeight; }
+      } else if (ev.type === 'error') {
+        throw new Error(ev.message);
+      }
+    }, { text });
+    if (!full.trim()) { throw new Error('模型未返回内容，请重试'); }
+    if (badge) badge.textContent = '完成';
+    // 暂存结果，供「替换到正文」使用
+    panel._fragmentResult = full.trim();
+    panel._fragmentRange = { start, end };
+    const applyBtn = $('frag-apply-btn');
+    if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = '替换到正文（覆盖选中文字）'; }
+    toast(`${label}完成，点击「替换到正文」生效`, 'ok');
+  } catch (e) {
+    if (out) { out.textContent = '⚠️ ' + e.message; out.classList.add('gen-error'); }
+    if (badge) badge.textContent = '失败';
+    toast(e.message, 'err');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function polishFragment(index) { runFragmentAction(index, 'polish'); }
+function expandFragment(index) { runFragmentAction(index, 'expand'); }
+
+// 将润色/扩写结果替换回正文文本框的选中位置
+function applyFragment(index, start, end) {
+  const panel = $('frag-panel');
+  if (!panel || !panel._fragmentResult) return;
+  const ta = $('ce-content');
+  if (!ta) return;
+  // 重新定位选中区间（若用户中途改动过文本，则退化为按当前选中替换）
+  let s = start, e = end;
+  if (typeof ta.selectionStart === 'number' && ta.selectionStart !== ta.selectionEnd) {
+    s = ta.selectionStart; e = ta.selectionEnd;
+  }
+  ta.value = ta.value.substring(0, s) + panel._fragmentResult + ta.value.substring(e);
+  panel.style.display = 'none';
+  panel._fragmentResult = null;
+  toast('已替换到正文，记得点「保存修改」', 'ok');
+}
+
+function cancelFragment() {
+  const panel = $('frag-panel');
+  if (panel) { panel.style.display = 'none'; panel._fragmentResult = null; }
 }
 
 // 在章节页内流式生成
