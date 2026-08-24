@@ -1,5 +1,7 @@
 # 织叙-NexTale (NexTale)
 
+> [English](README.en.md) | [日本語](README.ja.md) | [简体中文](README.md)
+
 An AI novel-writing tool built with Python + Web UI. Supports multiple writing modes (Outline / Improvised / Conversational), multiple AI provider integrations, character photo analysis, chapter polishing & expansion, finish/reopen management, trash bin, and a complete novel-writing workflow.
 
 ## Features
