@@ -1,6 +1,6 @@
 # 织叙-NexTale
 
-> [English](README.en.md) | [日本語](README.ja.md) | [简体中文](README.md)
+> [简体中文](README.md) | [繁體中文](README.zh-TW.md) | [English](README.en.md) | [日本語](README.ja.md)
 
 一个基于 Python + Web 界面的 AI 小说创作工具。支持多种创作模式（大纲式 / 即兴交互式 / 对话式）、多 AI 服务商接入、人物照片分析、章节润色扩写、完结管理、垃圾箱等完整的小说创作工作流。
 

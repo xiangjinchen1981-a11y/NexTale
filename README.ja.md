@@ -1,6 +1,6 @@
 # 織叙-NexTale（NexTale）
 
-> [English](README.en.md) | [日本語](README.ja.md) | [简体中文](README.md)
+> [简体中文](README.md) | [繁體中文](README.zh-TW.md) | [English](README.en.md) | [日本語](README.ja.md)
 
 Python + Web UI で構築された AI 小説執筆ツール。複数の執筆モード（アウトライン / 即興 / 会話）、複数の AI プロバイダー接続、キャラクター写真分析、章の推敲・拡張、完結管理、ゴミ箱など、完全な小説執筆ワークフローをサポートします。
 
