@@ -4,18 +4,19 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>织叙-NexTale</title>
-  <link rel="stylesheet" href="style.css?v=20260825f">
+  <link rel="stylesheet" href="style.css?v=20260826d">
 </head>
 <body>
   <header class="topbar">
     <div class="brand">📖 织叙-NexTale</div>
     <nav class="tabs" id="main-tabs">
       <button class="tab" data-tab="genres">题材库</button>
+      <button class="tab" data-tab="worldbooks">世界书</button>
       <button class="tab" data-tab="novels">小说创作</button>
       <button class="tab" data-tab="logs">日志</button>
     </nav>
     <span class="spacer"></span>
-    <button class="btn" id="btn-providers" onclick="nav('#/providers')">API 配置</button>
+    <button class="btn" id="btn-providers" onclick="nav('#/providers')">配置</button>
     <button class="btn theme-toggle" id="btn-theme" onclick="toggleTheme()" title="切换夜间模式">🌙</button>
     <button class="btn" id="btn-logout" onclick="logout()" style="display:none">退出登录</button>
   </header>
@@ -31,52 +32,68 @@
       </div>
     </section>
 
-    <!-- ============ API 配置（视图） ============ -->
+    <!-- ============ 配置（视图） ============ -->
     <section id="view-providers" class="view">
-      <h2>AI 服务商</h2>
-      <p class="hint">先添加服务商并「连接」拉取模型列表，再在服务商下「添加模型」——每个模型选类型（文本/视觉二选一）并配置参数，最后点「●」标记设为当前使用。</p>
-      <div id="provider-list" class="card-list"></div>
-
-      <h3 id="provider-form-title">添加服务商</h3>
-      <div class="form-grid">
-        <label>预设（可选）
-          <select id="preset-select">
-            <option value="">自定义</option>
-          </select>
-        </label>
-        <label>名称
-          <input id="p-name" placeholder="如 DeepSeek">
-        </label>
-        <label>Base URL
-          <input id="p-base" placeholder="https://api.deepseek.com/v1">
-        </label>
-        <label>API Key
-          <input id="p-key" type="password" placeholder="sk-...">
-        </label>
-        <label>代理模式
-          <select id="p-proxy">
-            <option value="direct">直连（国内服务商）</option>
-            <option value="system">系统代理（走环境变量）</option>
-            <option value="custom">自定义代理</option>
-          </select>
-        </label>
-        <label>自定义代理地址
-          <input id="p-proxy-url" placeholder="http://127.0.0.1:4780">
-        </label>
+      <div class="page-head">
+        <h2>配置</h2>
+        <div class="sub-tabs" id="config-sub-tabs">
+          <button type="button" class="sub-tab active" data-subtab="api" onclick="switchConfigTab('api')">大模型API</button>
+          <button type="button" class="sub-tab" data-subtab="prompt" onclick="switchConfigTab('prompt')">提示词</button>
+        </div>
       </div>
-      <button class="btn primary" id="btn-provider-save" onclick="saveProviderForm()">＋ 添加服务商</button>
-      <button class="btn" id="btn-provider-cancel" onclick="cancelEditProvider()" style="display:none">取消编辑</button>
 
-      <h3 style="margin-top:28px">生成参数（全局默认，模型可单独覆盖）</h3>
-      <div class="form-grid">
-        <label>创意度 temperature（0~1.5）
-          <input id="s-temperature" type="number" step="0.1" min="0" max="1.5" value="0.8">
-        </label>
-        <label>字数→token 系数
-          <input id="s-ratio" type="number" step="0.1" min="1" max="3" value="1.6">
-        </label>
+      <!-- 大模型API 配置 -->
+      <div id="config-tab-api">
+        <p class="hint">先添加服务商并「连接」拉取模型列表，再在服务商下「添加模型」——每个模型选类型（文本/视觉二选一）并配置参数，最后点「●」标记设为当前使用。</p>
+        <div id="provider-list" class="card-list"></div>
+
+        <h3 id="provider-form-title">添加服务商</h3>
+        <div class="form-grid">
+          <label>预设（可选）
+            <select id="preset-select">
+              <option value="">自定义</option>
+            </select>
+          </label>
+          <label>名称
+            <input id="p-name" placeholder="如 DeepSeek">
+          </label>
+          <label>Base URL
+            <input id="p-base" placeholder="https://api.deepseek.com/v1">
+          </label>
+          <label>API Key
+            <input id="p-key" type="password" placeholder="sk-...">
+          </label>
+          <label>代理模式
+            <select id="p-proxy">
+              <option value="direct">直连（国内服务商）</option>
+              <option value="system">系统代理（走环境变量）</option>
+              <option value="custom">自定义代理</option>
+            </select>
+          </label>
+          <label>自定义代理地址
+            <input id="p-proxy-url" placeholder="http://127.0.0.1:4780">
+          </label>
+        </div>
+        <button class="btn primary" id="btn-provider-save" onclick="saveProviderForm()">＋ 添加服务商</button>
+        <button class="btn" id="btn-provider-cancel" onclick="cancelEditProvider()" style="display:none">取消编辑</button>
+
+        <h3 style="margin-top:28px">生成参数（全局默认，模型可单独覆盖）</h3>
+        <div class="form-grid">
+          <label>创意度 temperature（0~1.5）
+            <input id="s-temperature" type="number" step="0.1" min="0" max="1.5" value="0.8">
+          </label>
+          <label>字数→token 系数
+            <input id="s-ratio" type="number" step="0.1" min="1" max="3" value="1.6">
+          </label>
+        </div>
+        <button class="btn primary" onclick="saveSettings()">保存生成参数</button>
       </div>
-      <button class="btn primary" onclick="saveSettings()">保存生成参数</button>
+
+      <!-- 提示词配置 -->
+      <div id="config-tab-prompt" style="display:none">
+        <p class="hint">自定义各类 AI 生成使用的提示词模板。模板中使用 <code>{变量}</code> 占位符，生成时会自动替换。留空并保存即恢复默认。</p>
+        <div id="prompt-config-list" class="card-list"></div>
+      </div>
     </section>
 
     <!-- ============ 题材库（视图） ============ -->
@@ -129,6 +146,59 @@
       </div>
 
       <div id="genre-list" class="card-list"></div>
+    </section>
+
+    <!-- ============ 世界书（视图） ============ -->
+    <section id="view-worldbooks" class="view">
+      <div class="page-head">
+        <h2>世界书</h2>
+        <span class="spacer"></span>
+        <button class="btn" onclick="showWorldbookForm()">＋ 新建世界书</button>
+        <button class="btn" onclick="showWorldbookImport()">导入世界书</button>
+      </div>
+
+      <!-- 新建/编辑世界书表单 -->
+      <div id="worldbook-form" class="card" style="display:none">
+        <div class="row">
+          <span class="title" id="worldbook-form-title">新建世界书</span>
+          <span class="spacer"></span>
+        </div>
+        <div class="form-grid">
+          <label>世界书名称
+            <input id="wb-name" placeholder="如 九州世界 / 修仙世界观">
+          </label>
+        </div>
+        <label>描述（可选）
+          <textarea id="wb-description" rows="2" placeholder="简要说明该世界书的内容"></textarea>
+        </label>
+        <p class="hint">条目可通过「导入」批量添加，也可在列表里逐条编辑。</p>
+        <div style="margin-top:12px">
+          <button class="btn primary" onclick="saveWorldbook()">保存</button>
+          <button class="btn" onclick="hideWorldbookForm()">取消</button>
+        </div>
+      </div>
+
+      <!-- 导入世界书 -->
+      <div id="worldbook-import" class="card" style="display:none">
+        <div class="row">
+          <span class="title">导入世界书（SillyTavern 格式）</span>
+          <span class="spacer"></span>
+        </div>
+        <p class="hint">支持 SillyTavern 世界书（World Info / Lorebook）JSON。可直接粘贴 JSON 文本，或选择文件上传。</p>
+        <label>世界书名称（可选，留空用文件内名称）
+          <input id="wb-import-name" placeholder="如 九州世界">
+        </label>
+        <textarea id="wb-import-text" rows="10" placeholder='粘贴 JSON，例如：{"entries":{"1":{"key":["关键词"],"content":"条目内容","comment":"备注","constant":false,"enabled":true,"position":"before_char","depth":4}}}'></textarea>
+        <div style="margin-top:10px">
+          <input type="file" id="wb-import-file" accept=".json,application/json" onchange="onWorldbookFileSelected(this)">
+        </div>
+        <div style="margin-top:12px">
+          <button class="btn primary" onclick="importWorldbook()">导入</button>
+          <button class="btn" onclick="hideWorldbookImport()">取消</button>
+        </div>
+      </div>
+
+      <div id="worldbook-list" class="card-list"></div>
     </section>
 
     <!-- ============ 日志（视图） ============ -->
@@ -361,6 +431,7 @@
         <div class="dialog-chat" id="dialog-chat"></div>
         <div class="dialog-input-bar">
           <textarea id="dialog-input" rows="2" placeholder="像聊天一样说一句剧情走向，例如：主角推开门，发现来的人竟然是失踪多年的兄长……"></textarea>
+          <input type="number" id="dialog-word-limit" min="50" max="5000" placeholder="500" title="AI 每次回复的字数（留空默认 500 字）" />
           <button class="btn primary" id="dialog-send-btn" onclick="sendDialogMessage()">发送</button>
         </div>
       </div>
@@ -406,6 +477,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260825g"></script>
+  <script src="app.js?v=20260826e"></script>
 </body>
 </html>

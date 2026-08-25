@@ -26,6 +26,8 @@ DEFAULT_SETTINGS = {
     "temperature": 0.8,
     # 全局前置提示词：附加到所有生成请求，统一约束创作方向
     "global_prompt": "",
+    # 各功能提示词模板（key -> 模板文本），空 dict 表示全部使用默认
+    "prompts": {},
 }
 
 _SCHEMA = """
@@ -109,6 +111,13 @@ CREATE TABLE IF NOT EXISTS genres (
   style TEXT NOT NULL DEFAULT '',
   reference_text TEXT NOT NULL DEFAULT '',
   description TEXT NOT NULL DEFAULT '',
+  created_at REAL NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS worldbooks (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  entries TEXT NOT NULL DEFAULT '[]',
   created_at REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_models_provider ON models(provider_id);
@@ -573,6 +582,62 @@ def delete_genre(genre_id):
     conn = _connect()
     try:
         conn.execute("DELETE FROM genres WHERE id = ?", (genre_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ---- 世界书 ----
+def list_worldbooks():
+    """返回所有世界书（按创建时间倒序），entries 解析为列表。"""
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT * FROM worldbooks ORDER BY created_at DESC")
+        result = []
+        for r in rows:
+            wb = dict(r)
+            wb["entries"] = _json_loads(wb.get("entries"), [])
+            result.append(wb)
+        return result
+    finally:
+        conn.close()
+
+
+def get_worldbook(wb_id):
+    conn = _connect()
+    try:
+        r = conn.execute("SELECT * FROM worldbooks WHERE id = ?", (wb_id,)).fetchone()
+        if not r:
+            return None
+        wb = dict(r)
+        wb["entries"] = _json_loads(wb.get("entries"), [])
+        return wb
+    finally:
+        conn.close()
+
+
+def save_worldbook(worldbook):
+    """新增或更新单个世界书（有 id 则更新，否则新增）。"""
+    conn = _connect()
+    try:
+        wb_id = worldbook.get("id") or new_id()
+        entries = worldbook.get("entries", [])
+        conn.execute(
+            "INSERT OR REPLACE INTO worldbooks (id, name, description, entries, created_at) "
+            "VALUES (?,?,?,?,?)",
+            (wb_id, worldbook.get("name", ""), worldbook.get("description", ""),
+             json.dumps(entries), worldbook.get("created_at", time.time())),
+        )
+        conn.commit()
+        return wb_id
+    finally:
+        conn.close()
+
+
+def delete_worldbook(wb_id):
+    conn = _connect()
+    try:
+        conn.execute("DELETE FROM worldbooks WHERE id = ?", (wb_id,))
         conn.commit()
     finally:
         conn.close()

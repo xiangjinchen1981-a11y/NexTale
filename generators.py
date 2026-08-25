@@ -2,6 +2,7 @@
 import re
 
 from ai_client import chat_text, chat_text_stream, chat_vision, AIClientError
+from prompts import get_prompt
 
 
 def _resolve(context, role):
@@ -80,14 +81,7 @@ def _truncate_text(text, max_chars):
 def analyze_photo(context, image_base64):
     """用视觉模型分析人物照片，返回 {appearance, personality}。"""
     provider, model, mcfg = _resolve(context, "vision")
-    prompt = (
-        "你是一位小说角色设定师。请仔细观察这张人物照片，从两个维度分析：\n"
-        "1. 外貌特征：年龄、五官、脸型、发型、身材、气质、穿着风格等。\n"
-        "2. 性格推测：从神态、表情、眼神、穿着风格推测其性格气质。\n"
-        "请严格按下面格式输出，不要输出其他内容：\n"
-        "【外貌】具体生动的描述，80~150字\n"
-        "【性格】具体生动的描述，80~150字"
-    )
+    prompt = get_prompt(context, "analyze_photo")
     content, _ = chat_vision(provider, model, _prepend_global(context, prompt), image_base64,
                              temperature=_temperature(context, mcfg), name="分析照片")
     appearance, personality = _parse_two_fields(content)
@@ -100,18 +94,7 @@ def analyze_style(context, reference_text):
     # 根据模型上下文长度截断参考文本（默认最多 6000 字）
     limit = _context_limit(context, mcfg)
     ref = reference_text[: limit if limit else 6000]
-    prompt = (
-        "你是一位资深小说编辑。请分析下面这部小说片段的写作风格，"
-        "提炼出可以指导 AI 模仿的要点，涵盖：\n"
-        "1. 叙事视角（第一人称/第三人称等）\n"
-        "2. 语言风格（简洁/华丽/口语化/文艺/冷峻等）\n"
-        "3. 叙事节奏与段落结构\n"
-        "4. 描写与修辞特点\n"
-        "5. 情绪基调\n"
-        "请用要点式输出，控制在 250 字以内，直接给出可执行的风格要求。\n\n"
-        "参考小说片段：\n"
-        f"{ref}"
-    )
+    prompt = get_prompt(context, "analyze_style").format(ref=ref)
     content, _ = chat_text(provider, model, _messages(context, prompt),
                            temperature=_temperature(context, mcfg), name="分析风格")
     return content.strip()
@@ -124,19 +107,14 @@ def generate_outline(context, novel):
     relationships_info = _format_relationships(context, novel)
     style = novel.get("style") or "文笔流畅自然，情节紧凑，人物鲜明。"
 
-    prompt = (
-        "你是一位经验丰富的小说家。请根据以下设定，为一部小说创作完整大纲。\n\n"
-        f"【小说标题】{novel.get('title') or '未命名'}\n"
-        f"【题材类型】{novel.get('genre') or '不限'}\n"
-        f"【写作风格】{style}\n"
-        f"【目标章节数】{novel.get('chapter_count', 10)} 章\n"
-        f"【每章字数】约 {novel.get('words_per_chapter', 2000)} 字\n\n"
-        f"【人物设定】\n{characters_info}\n\n"
-        f"【人物关系】\n{relationships_info}\n\n"
-        "请输出以下三部分，严格按格式：\n"
-        "【故事梗概】200 字以内的完整故事脉络\n"
-        "【世界观】150 字以内（现实题材可简述时代背景）\n"
-        "【章节大纲】共 N 章，每章一行，格式：第1章 标题｜一句话内容概要"
+    prompt = get_prompt(context, "generate_outline").format(
+        title=novel.get("title") or "未命名",
+        genre=novel.get("genre") or "不限",
+        style=style,
+        chapter_count=novel.get("chapter_count", 10),
+        words_per_chapter=novel.get("words_per_chapter", 2000),
+        characters=characters_info,
+        relationships=relationships_info,
     )
     content, _ = chat_text(provider, model, _messages(context, prompt),
                            temperature=_temperature(context, mcfg), name="生成大纲")
@@ -181,25 +159,7 @@ def _chapter_prompt_and_params(context, novel, chapter_index):
     if reference:
         reference = _truncate_text(reference, 2000)
 
-    prompt = (
-        "你是一位小说家。请撰写小说《{title}》的第 {n} 章，严格遵循以下全部设定。\n\n"
-        "【小说标题】{title}\n"
-        "【题材类型】{genre}\n"
-        "【全书故事梗概】\n{summary}\n\n"
-        "【世界观设定】\n{world}\n\n"
-        "【全书章节大纲】\n{outline}\n\n"
-        "【当前章节】第 {n} 章 {ctitle}｜{csummary}\n\n"
-        "【人物设定】\n{chars}\n\n"
-        "【人物关系】\n{rels}\n\n"
-        "【写作风格要求】\n{style}\n"
-        "【参考原文片段】\n{reference}\n\n"
-        "【前情提要】\n{prev}\n\n"
-        "【本章要求】\n"
-        "1. 正文约 {words} 字，结构完整，有起承转合。\n"
-        "2. 严格遵循人物设定、关系与世界观，不得擅自新增重要角色或改变设定。\n"
-        "3. 与前情提要保持连贯，承接上一章结尾。\n"
-        "4. 直接输出正文内容，不要输出章节标题、不要任何解释说明。"
-    ).format(
+    prompt = get_prompt(context, "generate_chapter").format(
         title=novel.get("title") or "未命名",
         n=chapter_index,
         genre=genre,
@@ -215,6 +175,10 @@ def _chapter_prompt_and_params(context, novel, chapter_index):
         prev=prev,
         words=words,
     )
+    # 注入世界书「恒常」条目
+    wb_text = _format_worldbooks(context, only_constant=True)
+    if wb_text:
+        prompt += "\n\n【世界书设定】\n" + wb_text
     return provider, model, mcfg, prompt, words, max_tokens
 
 
@@ -318,27 +282,7 @@ def _improv_chapter_prompt_and_params(context, novel, chapter_index, instruction
     if referenced and limit:
         referenced = _truncate_text(referenced, int(limit * 0.5))
 
-    prompt = (
-        "你是一位小说家，正在以「边写边定」的方式创作小说《{title}》的第 {n} 章。\n"
-        "本章没有预置大纲，请根据用户的写作指引来推进情节。\n\n"
-        "【小说标题】{title}\n"
-        "【题材类型】{genre}\n"
-        "【故事梗概】\n{summary}\n\n"
-        "【故事背景】\n{background}\n\n"
-        "【世界观设定】\n{world}\n\n"
-        "【人物设定】\n{chars}\n\n"
-        "【人物关系】\n{rels}\n\n"
-        "【写作风格要求】\n{style}\n"
-        "【参考原文片段】\n{reference}\n\n"
-        "【前情提要】\n{prev}\n\n"
-        "【引用的前文章节】\n{referenced}\n\n"
-        "【本章写作指引】\n{instruction}\n\n"
-        "【本章要求】\n"
-        "1. 严格按写作指引推进情节，正文约 {words} 字，结构完整，有起承转合。\n"
-        "2. 遵循人物设定、关系与世界观，不得擅自新增重要角色或改变设定。\n"
-        "3. 与前情提要及引用的前文保持连贯，承接上一章结尾。\n"
-        "4. 直接输出正文内容，不要输出章节标题、不要任何解释说明。"
-    ).format(
+    prompt = get_prompt(context, "improv_chapter").format(
         title=novel.get("title") or "未命名",
         n=chapter_index,
         genre=genre,
@@ -354,6 +298,10 @@ def _improv_chapter_prompt_and_params(context, novel, chapter_index, instruction
         instruction=instruction or "（无特别指引，请自然推进剧情）",
         words=words,
     )
+    # 注入世界书「恒常」条目
+    wb_text = _format_worldbooks(context, only_constant=True)
+    if wb_text:
+        prompt += "\n\n【世界书设定】\n" + wb_text
     return provider, model, mcfg, prompt, words, max_tokens
 
 
@@ -390,11 +338,8 @@ def summarize_chapter_content(context, content, chapter_index, max_retries=2):
     模型偶发空响应时自动重试（最多 max_retries 次）。
     """
     provider, model, mcfg = _resolve(context, "text")
-    prompt = (
-        f"请用 80~120 字概括下面这段小说第 {chapter_index} 章的核心情节，"
-        "保留关键人物与转折。只输出摘要正文本身，"
-        "不要加「摘要：」等任何前缀标题，也不要在末尾标注字数：\n\n" + content[-4000:]
-    )
+    prompt = get_prompt(context, "summarize_chapter").format(
+        chapter_index=chapter_index, content=content[-4000:])
     last_err = None
     for attempt in range(max_retries + 1):
         try:
@@ -412,10 +357,8 @@ def summarize_chapter_content(context, content, chapter_index, max_retries=2):
 def condense_progress(context, progress_summary):
     """当前情提要过长时，浓缩为连贯摘要。"""
     provider, model, mcfg = _resolve(context, "text")
-    prompt = (
-        "请把下面这段小说的前情提要浓缩为 1200 字以内的连贯摘要，"
-        "保留主线脉络和关键人物关系，直接输出：\n\n" + progress_summary[-8000:]
-    )
+    prompt = get_prompt(context, "condense_progress").format(
+        content=progress_summary[-8000:])
     s, _ = chat_text(provider, model, _messages(context, prompt),
                      temperature=_temperature(context, mcfg), max_tokens=2000, name="浓缩前情")
     return s.strip()
@@ -459,6 +402,36 @@ def replace_progress_entry(progress_summary, chapter_index, new_summary):
 
 
 # ---------- 格式化与解析辅助 ----------
+
+def _format_worldbooks(context, only_constant=True):
+    """把世界书条目格式化为 prompt 文本。
+
+    only_constant=True 时只取「恒常注入」条目（constant=True 且 enabled），
+    这些条目无条件加入上下文；False 时取所有启用条目。
+    返回空字符串表示没有可注入的条目。
+    """
+    wbs = context.get("worldbooks") or []
+    parts = []
+    for wb in wbs:
+        entries = wb.get("entries") or []
+        for e in entries:
+            if e.get("enabled") is False:
+                continue
+            if only_constant and not e.get("constant"):
+                continue
+            content = (e.get("content") or "").strip()
+            if not content:
+                continue
+            keys = e.get("key") or []
+            key_str = "、".join(keys) if keys else ""
+            line = content
+            if key_str:
+                line = f"（触发词：{key_str}）{content}"
+            parts.append(line)
+    if not parts:
+        return ""
+    return "\n\n".join(parts)
+
 
 def _format_characters(context, novel):
     chars = []
@@ -580,32 +553,16 @@ def _fragment_context(context, novel):
 def _fragment_prompt(context, novel, chapter_index, text, action):
     """构造润色 / 扩写 prompt。action: 'polish' | 'expand'。"""
     info = _fragment_context(context, novel)
-    if action == "polish":
-        task = (
-            "请在保持原意、情节与人物关系不变的前提下，对下面这段小说片段进行润色：\n"
-            "1. 优化措辞与句式，使语言更流畅、更有文学性；\n"
-            "2. 修正语病、逻辑不通与重复啰嗦之处；\n"
-            "3. 保持原有篇幅，不擅自增删情节、不改变人物与设定；\n"
-            "4. 直接输出润色后的完整片段，不要任何解释说明。"
-        )
-    else:
-        task = (
-            "请在保持原有情节走向与人物设定的前提下，对下面这段小说片段进行扩写：\n"
-            "1. 丰富细节：补充动作、神态、心理、环境描写，使画面更生动；\n"
-            "2. 适当延展对话与情节，但不得新增关键角色或改变既定结局；\n"
-            "3. 篇幅扩充到原文的 2~3 倍左右；\n"
-            "4. 直接输出扩写后的完整片段，不要任何解释说明。"
-        )
-    return (
-        f"你是一位小说家，正在处理小说《{novel.get('title') or '未命名'}》第 {chapter_index} 章的片段。\n\n"
-        "【写作风格要求】\n{style}\n\n"
-        "【世界观设定】\n{world}\n\n"
-        "【人物设定】\n{chars}\n\n"
-        "【前情提要】\n{prev}\n\n"
-        "{task}\n\n"
-        "【待处理片段】\n{text}"
-    ).format(style=info["style"], world=info["worldbuilding"],
-             chars=info["characters"], prev=info["prev"], task=task, text=text)
+    key = "polish_fragment" if action == "polish" else "expand_fragment"
+    return get_prompt(context, key).format(
+        title=novel.get("title") or "未命名",
+        chapter_index=chapter_index,
+        style=info["style"],
+        world=info["worldbuilding"],
+        chars=info["characters"],
+        prev=info["prev"],
+        text=text,
+    )
 
 
 def _fragment_stream(context, novel, chapter_index, text, action):
@@ -645,8 +602,8 @@ def _format_dialog_history(messages, max_turns=20):
     return "\n".join(lines)
 
 
-def _dialog_prompt(context, novel, user_text, history):
-    """构造对话模式的 prompt：每次输出 ≤500 字，以剧情片段推进。"""
+def _dialog_prompt(context, novel, user_text, history, word_limit=500):
+    """构造对话模式的 prompt：每次输出约 word_limit 字，以剧情片段推进。"""
     chars = _format_characters(context, novel)
     rels = _format_relationships(context, novel)
     style = novel.get("style") or "文笔流畅自然，情节紧凑，人物鲜明。"
@@ -655,25 +612,8 @@ def _dialog_prompt(context, novel, user_text, history):
     prev = _clean_progress(novel.get("progress_summary")) or "（暂无前情）"
     history_text = _format_dialog_history(history)
 
-    return (
-        f"你是一位小说家，正在与作者以「对话」的方式共同创作小说《{novel.get('title') or '未命名'}》。\n"
-        "作者每发一句话，你就以一段小说正文片段回应，双方像 IM 聊天一样交替推进剧情。\n\n"
-        "【题材类型】{genre}\n"
-        "【故事梗概】\n{summary}\n\n"
-        "【故事背景】\n{background}\n\n"
-        "【世界观设定】\n{world}\n\n"
-        "【人物设定】\n{chars}\n\n"
-        "【人物关系】\n{rels}\n\n"
-        "【写作风格要求】\n{style}\n\n"
-        "【前情提要】\n{prev}\n\n"
-        "【已发生的对话】\n{history}\n\n"
-        "【作者本轮发言】\n{user}\n\n"
-        "【本轮要求】\n"
-        "1. 以一段连贯的小说正文片段回应，承接作者发言与前情，推进剧情。\n"
-        "2. 严格控制在 500 字以内（约 300~500 字），只写本轮进展，不要一次性写完整个故事。\n"
-        "3. 遵循人物设定、关系与世界观，不得擅自新增重要角色或改变设定。\n"
-        "4. 直接输出正文片段，不要任何解释、不要标注「AI：」等前缀。"
-    ).format(
+    prompt = get_prompt(context, "dialog").format(
+        title=novel.get("title") or "未命名",
         genre=novel.get("genre") or "不限",
         summary=novel.get("summary") or "（暂无）",
         background=background,
@@ -684,15 +624,21 @@ def _dialog_prompt(context, novel, user_text, history):
         prev=prev,
         history=history_text,
         user=user_text,
+        limit=word_limit,
     )
+    # 注入世界书「恒常」条目
+    wb_text = _format_worldbooks(context, only_constant=True)
+    if wb_text:
+        prompt += "\n\n【世界书设定】\n" + wb_text
+    return prompt
 
 
-def dialog_stream(context, novel, user_text, history):
-    """对话模式：流式生成一段 ≤500 字的剧情片段。"""
+def dialog_stream(context, novel, user_text, history, word_limit=500):
+    """对话模式：流式生成一段约 word_limit 字的剧情片段。"""
     provider, model, mcfg = _resolve(context, "text")
-    prompt = _dialog_prompt(context, novel, user_text, history)
-    # 500 字 ≈ 750 token（中文 1 字 ≈ 1.5 token），留足余量
-    max_tokens = mcfg.get("max_tokens") or 900
+    prompt = _dialog_prompt(context, novel, user_text, history, word_limit)
+    # 中文 1 字 ≈ 1.5 token，按字数换算并留足余量（至少 256）
+    max_tokens = mcfg.get("max_tokens") or max(256, int(word_limit * 1.5 * 1.4))
     for delta in chat_text_stream(
             provider, model, _messages(context, prompt),
             temperature=_temperature(context, mcfg),

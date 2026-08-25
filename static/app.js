@@ -194,8 +194,8 @@ function maskKey(k) {
 }
 
 // ============ 视图 / 路由 ============
-// 视图列表：login（登录）、providers（API配置）、genres（题材库）、novels（列表）、trash（垃圾箱）、editor（创作）、generate（生成）、chapter（章节详情）、reader（阅读）、improv（即兴写作）、dialog（对话模式）、logs（请求日志）
-const VIEWS = ['login', 'providers', 'genres', 'novels', 'trash', 'editor', 'generate', 'chapter', 'reader', 'improv', 'dialog', 'logs'];
+// 视图列表：login（登录）、providers（配置）、genres（题材库）、worldbooks（世界书）、novels（列表）、trash（垃圾箱）、editor（创作）、generate（生成）、chapter（章节详情）、reader（阅读）、improv（即兴写作）、dialog（对话模式）、logs（请求日志）
+const VIEWS = ['login', 'providers', 'genres', 'worldbooks', 'novels', 'trash', 'editor', 'generate', 'chapter', 'reader', 'improv', 'dialog', 'logs'];
 
 // 当前小说 id（用于创作/生成页定位）
 let currentNovelId = null;
@@ -213,18 +213,20 @@ function showView(name) {
   if (tabs) tabs.style.display = isLogin ? 'none' : '';
   if (logoutBtn) logoutBtn.style.display = isLogin ? 'none' : '';
   if (providersBtn) providersBtn.style.display = isLogin ? 'none' : '';
-  // 顶部标签高亮（providers 不再作为标签）
+  // 顶部标签高亮（providers/配置页 与 login 不点亮任何标签）
   document.querySelectorAll('.tab').forEach(b => {
     const tab = b.dataset.tab;
     let active = false;
     if (name === 'genres' && tab === 'genres') active = true;
+    else if (name === 'worldbooks' && tab === 'worldbooks') active = true;
     else if (name === 'logs' && tab === 'logs') active = true;
-    else if (name !== 'genres' && name !== 'logs' && name !== 'login' && tab === 'novels') active = true;
+    else if (name !== 'genres' && name !== 'worldbooks' && name !== 'logs' && name !== 'login' && name !== 'providers' && tab === 'novels') active = true;
     b.classList.toggle('active', active);
   });
   // 视图切换时触发对应数据加载
-  if (name === 'providers') { loadProviders(); }
+  if (name === 'providers') { switchConfigTab('api'); loadProviders(); }
   if (name === 'genres') { loadGenres(); }
+  if (name === 'worldbooks') { loadWorldbooks(); }
   if (name === 'novels') { loadNovels(); }
   if (name === 'trash') { loadTrash(); }
   if (name === 'logs') { loadLogs(); }
@@ -257,6 +259,11 @@ async function router() {
 
   if (section === 'genres') {
     showView('genres');
+    return;
+  }
+
+  if (section === 'worldbooks') {
+    showView('worldbooks');
     return;
   }
 
@@ -347,6 +354,8 @@ document.querySelectorAll('.tab').forEach(btn => {
     const tab = btn.dataset.tab;
     if (tab === 'genres') {
       nav('#/genres');
+    } else if (tab === 'worldbooks') {
+      nav('#/worldbooks');
     } else if (tab === 'logs') {
       nav('#/logs');
     } else {
@@ -372,6 +381,115 @@ async function loadProviders() {
     if (sel.value) $('p-base').value = sel.value;
     if (sel.value && !$('p-name').value) $('p-name').value = sel.selectedOptions[0].textContent;
   };
+  loadPromptConfig();
+}
+
+// ================= 配置页子 Tab 切换 =================
+function switchConfigTab(name) {
+  const apiEl = $('config-tab-api');
+  const promptEl = $('config-tab-prompt');
+  if (apiEl) apiEl.style.display = name === 'api' ? 'block' : 'none';
+  if (promptEl) promptEl.style.display = name === 'prompt' ? 'block' : 'none';
+  // 子 tab 高亮
+  document.querySelectorAll('#config-sub-tabs .sub-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.subtab === name);
+  });
+  // 切换到提示词 tab 时刷新提示词配置
+  if (name === 'prompt') loadPromptConfig();
+}
+
+// ================= 提示词配置 =================
+let promptConfigState = { defs: {}, custom: {} };  // 缓存的提示词定义与自定义值
+
+async function loadPromptConfig() {
+  try {
+    const d = await api('/api/prompts');
+    promptConfigState.defs = d.defs || {};
+    promptConfigState.custom = d.custom || {};
+  } catch (e) { /* 忽略，页面仍可用 */ }
+  renderPromptConfig();
+}
+
+function renderPromptConfig() {
+  const box = $('prompt-config-list');
+  if (!box) return;
+  const defs = promptConfigState.defs;
+  const custom = promptConfigState.custom;
+  const keys = Object.keys(defs);
+  if (!keys.length) return;
+
+  box.innerHTML = keys.map(key => {
+    const d = defs[key];
+    const isCustom = custom[key] && custom[key].trim();
+    // 变量说明
+    const varList = Object.entries(d.vars || {}).map(([v, desc]) => `<code>{${v}}</code><span class="prompt-var-desc">${esc(desc)}</span>`).join('');
+    return `
+    <div class="card prompt-config-item" data-key="${key}">
+      <div class="row">
+        <span class="title">${esc(d.label)}</span>
+        <span class="badge ${isCustom ? 'prompt-custom-badge' : ''}">${isCustom ? '已自定义' : '默认'}</span>
+        <span class="spacer"></span>
+        <button class="btn" onclick="togglePromptEditor('${key}')">编辑</button>
+        <button class="btn danger" onclick="resetPrompt('${key}')" ${isCustom ? '' : 'disabled'}>恢复默认</button>
+      </div>
+      <div class="meta">${esc(d.desc || '')}</div>
+      ${varList ? `<div class="prompt-vars">${varList}</div>` : ''}
+      <div class="prompt-editor" id="prompt-editor-${key}" style="display:none">
+        <textarea class="prompt-editor-ta" id="prompt-ta-${key}" rows="10">${esc(custom[key] || '')}</textarea>
+        <div class="row" style="margin-top:8px">
+          <button class="btn primary" onclick="savePrompt('${key}')">保存</button>
+          <button class="btn" onclick="cancelPromptEdit('${key}')">取消</button>
+          <span class="hint">留空并保存即恢复默认</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function togglePromptEditor(key) {
+  const ed = $('prompt-editor-' + key);
+  if (!ed) return;
+  const isHidden = ed.style.display === 'none';
+  ed.style.display = isHidden ? 'block' : 'none';
+  if (isHidden) {
+    const ta = $('prompt-ta-' + key);
+    if (ta && !ta.value && promptConfigState.defs[key]) {
+      ta.placeholder = promptConfigState.defs[key].default.slice(0, 200) + '……（当前使用默认模板）';
+    }
+  }
+}
+
+function cancelPromptEdit(key) {
+  const ed = $('prompt-editor-' + key);
+  if (ed) ed.style.display = 'none';
+}
+
+async function savePrompt(key) {
+  const ta = $('prompt-ta-' + key);
+  if (!ta) return;
+  const val = ta.value;
+  try {
+    const d = await api('/api/prompts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: { [key]: val } }),
+    });
+    promptConfigState.custom = d.prompts || {};
+    renderPromptConfig();
+    toast(val.trim() ? '提示词已保存' : '已恢复默认', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function resetPrompt(key) {
+  if (!confirm('确定恢复该提示词为默认模板？')) return;
+  try {
+    const d = await api('/api/prompts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompts: { [key]: '' } }),
+    });
+    promptConfigState.custom = d.prompts || {};
+    renderPromptConfig();
+    toast('已恢复默认', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 function proxyLabel(p) {
@@ -1675,6 +1793,10 @@ async function saveDialogEdit(idx) {
 
   let full = '';
   try {
+    const wlEl = $('dialog-word-limit');
+    const wordLimit = wlEl && wlEl.value.trim() !== '' ? parseInt(wlEl.value, 10) : null;
+    const body = { text: newText, history: prefix };
+    if (wordLimit !== null && !isNaN(wordLimit)) body.word_limit = wordLimit;
     await streamApi(`/api/novels/${state.novel.id}/dialog/stream`, (ev) => {
       if (ev.type === 'delta') {
         full += ev.content;
@@ -1685,7 +1807,7 @@ async function saveDialogEdit(idx) {
       } else if (ev.type === 'error') {
         throw new Error(ev.message);
       }
-    }, { text: newText, history: prefix });
+    }, body);
 
     if (!full.trim()) throw new Error('模型未返回内容，请重试');
     // 更新本地 state：前缀 + 新 user + 新 AI
@@ -1771,6 +1893,12 @@ async function sendDialogMessage() {
   const input = $('dialog-input');
   const text = input.value.trim();
   if (!text) return toast('请先输入内容', 'err');
+  // 读取本轮期望字数（留空则后端默认 500）
+  const wlEl = $('dialog-word-limit');
+  const wordLimit = wlEl && wlEl.value.trim() !== '' ? parseInt(wlEl.value, 10) : null;
+  if (wordLimit !== null && (isNaN(wordLimit) || wordLimit < 50 || wordLimit > 5000)) {
+    return toast('字数需在 50~5000 之间', 'err');
+  }
 
   dialogSending = true;
   const btn = $('dialog-send-btn');
@@ -1800,6 +1928,8 @@ async function sendDialogMessage() {
 
   let full = '';
   try {
+    const body = { text };
+    if (wordLimit !== null) body.word_limit = wordLimit;
     await streamApi(`/api/novels/${state.novel.id}/dialog/stream`, (ev) => {
       if (ev.type === 'delta') {
         full += ev.content;
@@ -1810,7 +1940,7 @@ async function sendDialogMessage() {
       } else if (ev.type === 'error') {
         throw new Error(ev.message);
       }
-    }, { text });
+    }, body);
 
     if (!full.trim()) throw new Error('模型未返回内容，请重试');
     // 更新 state 中的对话历史（供下次渲染）
@@ -2863,6 +2993,257 @@ async function importGenres() {
     $('g-import-text').value = '';
     await loadGenres();
     toast(`成功导入 ${d.imported} 个题材`, 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// ============ 世界书 ============
+let worldbooksState = { list: [], editingId: null, entryEditing: null };
+
+async function loadWorldbooks() {
+  try {
+    const d = await api('/api/worldbooks');
+    worldbooksState.list = d.worldbooks || [];
+  } catch (e) { toast(e.message, 'err'); }
+  renderWorldbooks();
+}
+
+function renderWorldbooks() {
+  const box = $('worldbook-list');
+  if (!box) return;
+  const list = worldbooksState.list;
+  if (!list.length) {
+    box.innerHTML = '<div class="card meta">暂无世界书，点击右上角「新建世界书」或「导入世界书」开始。</div>';
+    return;
+  }
+  box.innerHTML = list.map(wb => {
+    const entries = wb.entries || [];
+    const enabledCount = entries.filter(e => e.enabled !== false).length;
+    return `
+    <div class="card worldbook-item">
+      <div class="row">
+        <span class="title">${esc(wb.name)}</span>
+        <span class="badge">${entries.length} 条目</span>
+        ${enabledCount !== entries.length ? `<span class="badge">启用 ${enabledCount}</span>` : ''}
+        <span class="spacer"></span>
+        <button class="btn" onclick="toggleWorldbookEntries('${wb.id}')">条目</button>
+        <button class="btn" onclick="startEditWorldbook('${wb.id}')">编辑</button>
+        <button class="btn danger" onclick="deleteWorldbook('${wb.id}')">删除</button>
+      </div>
+      ${wb.description ? `<div class="meta">${esc(wb.description)}</div>` : ''}
+      <div id="wb-entries-${wb.id}" style="display:none"></div>
+    </div>`;
+  }).join('');
+}
+
+// 展开/收起世界书条目
+function toggleWorldbookEntries(wid) {
+  const wrap = $('wb-entries-' + wid);
+  if (!wrap) return;
+  const wb = worldbooksState.list.find(x => x.id === wid);
+  if (!wb) return;
+  if (wrap.style.display === 'none') {
+    wrap.style.display = 'block';
+    const entries = wb.entries || [];
+    if (!entries.length) {
+      wrap.innerHTML = '<div class="meta" style="margin-top:8px">该世界书暂无条目，可通过「导入」添加。</div>';
+      return;
+    }
+    wrap.innerHTML = `
+      <div class="worldbook-entries">
+        ${entries.map((e, i) => `
+          <div class="worldbook-entry ${e.enabled === false ? 'disabled' : ''}">
+            <div class="row">
+              <span class="worldbook-entry-key">${esc((e.key || []).join(' / ') || '（无关键词）')}</span>
+              ${e.comment ? `<span class="meta">${esc(e.comment)}</span>` : ''}
+              ${e.constant ? '<span class="badge">恒常</span>' : ''}
+              ${e.enabled === false ? '<span class="badge">已禁用</span>' : ''}
+              <span class="spacer"></span>
+              <button class="dialog-act-btn" onclick="editWorldbookEntry('${wb.id}', ${i})">编辑</button>
+              <button class="dialog-act-btn danger" onclick="deleteWorldbookEntry('${wb.id}', ${i})">删除</button>
+            </div>
+            <div class="worldbook-entry-content">${esc(e.content || '')}</div>
+          </div>`).join('')}
+      </div>`;
+  } else {
+    wrap.style.display = 'none';
+  }
+}
+
+// 新建世界书
+function showWorldbookForm() {
+  worldbooksState.editingId = null;
+  $('worldbook-form-title').textContent = '新建世界书';
+  $('wb-name').value = '';
+  $('wb-description').value = '';
+  $('worldbook-form').style.display = 'block';
+}
+
+function hideWorldbookForm() {
+  $('worldbook-form').style.display = 'none';
+}
+
+function startEditWorldbook(wid) {
+  const wb = worldbooksState.list.find(x => x.id === wid);
+  if (!wb) return;
+  worldbooksState.editingId = wid;
+  $('worldbook-form-title').textContent = '编辑世界书';
+  $('wb-name').value = wb.name || '';
+  $('wb-description').value = wb.description || '';
+  $('worldbook-form').style.display = 'block';
+  $('worldbook-form').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function saveWorldbook() {
+  const name = $('wb-name').value.trim();
+  if (!name) return toast('请填写世界书名称', 'err');
+  const body = { name, description: $('wb-description').value.trim() };
+  try {
+    if (worldbooksState.editingId) {
+      await api('/api/worldbooks/' + worldbooksState.editingId, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      toast('世界书已更新', 'ok');
+    } else {
+      await api('/api/worldbooks', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      toast('世界书已创建', 'ok');
+    }
+    worldbooksState.editingId = null;
+    hideWorldbookForm();
+    await loadWorldbooks();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function deleteWorldbook(wid) {
+  if (!confirm('确定删除该世界书？')) return;
+  try {
+    await api('/api/worldbooks/' + wid, { method: 'DELETE' });
+    await loadWorldbooks();
+    toast('已删除', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// 导入世界书
+function showWorldbookImport() {
+  $('worldbook-import').style.display = 'block';
+}
+
+function hideWorldbookImport() {
+  $('worldbook-import').style.display = 'none';
+}
+
+function onWorldbookFileSelected(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    $('wb-import-text').value = reader.result;
+    // 若未填名称，用文件名作为世界书名称
+    if (!$('wb-import-name').value.trim()) {
+      $('wb-import-name').value = file.name.replace(/\.json$/i, '');
+    }
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+async function importWorldbook() {
+  const text = $('wb-import-text').value.trim();
+  if (!text) return toast('请粘贴 JSON 或选择文件', 'err');
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    return toast('JSON 格式错误：' + e.message, 'err');
+  }
+  try {
+    const d = await api('/api/worldbooks/import', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: $('wb-import-name').value.trim(),
+        data: data,
+      }),
+    });
+    hideWorldbookImport();
+    $('wb-import-text').value = '';
+    $('wb-import-name').value = '';
+    $('wb-import-file').value = '';
+    await loadWorldbooks();
+    toast(`成功导入世界书，共 ${d.imported} 个条目`, 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// 编辑/删除单条世界书条目（简化：弹窗编辑）
+function editWorldbookEntry(wid, idx) {
+  const wb = worldbooksState.list.find(x => x.id === wid);
+  if (!wb) return;
+  const entry = wb.entries[idx];
+  if (!entry) return;
+  const keys = (entry.key || []).join(', ');
+  const comment = entry.comment || '';
+  const content = entry.content || '';
+  const enabled = entry.enabled !== false;
+  const constant = !!entry.constant;
+  const html = `
+    <div class="card" style="margin-top:10px">
+      <span class="title">编辑条目</span>
+      <div class="form-grid">
+        <label>触发关键词（逗号分隔）
+          <input id="we-key" value="${esc(keys)}">
+        </label>
+        <label>备注
+          <input id="we-comment" value="${esc(comment)}">
+        </label>
+      </div>
+      <label>条目内容
+        <textarea id="we-content" rows="5">${esc(content)}</textarea>
+      </label>
+      <div class="row" style="margin-top:8px">
+        <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="we-enabled" ${enabled ? 'checked' : ''}> 启用</label>
+        <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="we-constant" ${constant ? 'checked' : ''}> 恒常注入</label>
+      </div>
+      <div style="margin-top:10px">
+        <button class="btn primary" onclick="saveWorldbookEntry('${wid}', ${idx})">保存</button>
+        <button class="btn" onclick="toggleWorldbookEntries('${wid}'); toggleWorldbookEntries('${wid}')">取消</button>
+      </div>
+    </div>`;
+  const wrap = $('wb-entries-' + wid);
+  if (wrap) { wrap.innerHTML = html; wrap.style.display = 'block'; }
+}
+
+async function saveWorldbookEntry(wid, idx) {
+  const wb = worldbooksState.list.find(x => x.id === wid);
+  if (!wb) return;
+  const entry = wb.entries[idx];
+  if (!entry) return;
+  const keys = $('we-key').value.split(',').map(s => s.trim()).filter(Boolean);
+  entry.key = keys;
+  entry.comment = $('we-comment').value.trim();
+  entry.content = $('we-content').value;
+  entry.enabled = $('we-enabled').checked;
+  entry.constant = $('we-constant').checked;
+  try {
+    await api('/api/worldbooks/' + wid, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entries: wb.entries }),
+    });
+    toast('条目已保存', 'ok');
+    await loadWorldbooks();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function deleteWorldbookEntry(wid, idx) {
+  const wb = worldbooksState.list.find(x => x.id === wid);
+  if (!wb) return;
+  if (!confirm('确定删除该条目？')) return;
+  wb.entries.splice(idx, 1);
+  try {
+    await api('/api/worldbooks/' + wid, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entries: wb.entries }),
+    });
+    toast('条目已删除', 'ok');
+    await loadWorldbooks();
   } catch (e) { toast(e.message, 'err'); }
 }
 

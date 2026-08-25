@@ -69,6 +69,27 @@ body {
 .tab:hover { background: var(--accent-soft); color: var(--accent); }
 .tab.active { background: var(--accent); color: #fff; }
 
+/* 配置页子 tab */
+.sub-tabs {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  background: var(--subtle-bg, var(--bg));
+  padding: 4px;
+  border-radius: 10px;
+}
+.sub-tab {
+  border: none;
+  background: transparent;
+  padding: 6px 16px;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 8px;
+  color: var(--muted);
+}
+.sub-tab:hover { background: var(--accent-soft); color: var(--accent); }
+.sub-tab.active { background: var(--accent); color: #fff; }
+
 .container { max-width: 1080px; margin: 0 auto; padding: 24px; }
 
 .view { display: none; }
@@ -840,6 +861,18 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   background: var(--bg, #fff);
   color: var(--text);
 }
+.dialog-input-bar input[type="number"] {
+  flex: none;
+  width: 76px;
+  height: 44px;
+  padding: 0 10px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg, #fff);
+  color: var(--text);
+  text-align: center;
+}
 .dialog-input-bar .btn { height: 44px; flex: none; }
 
 /* 对话消息操作按钮 + 编辑 + 章节生成面板 */
@@ -936,3 +969,73 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 }
 .dialog-act-btn.danger { color: #c0392b; border-color: #e74c3c; }
 .dialog-act-btn.danger:hover { color: #e74c3c; border-color: #e74c3c; }
+
+/* ============ 提示词配置 ============ */
+.prompt-config-item { margin-bottom: 12px; }
+.prompt-config-item .title { font-size: 15px; }
+.prompt-custom-badge {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.prompt-vars {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.prompt-vars code {
+  padding: 1px 5px;
+  background: var(--subtle-bg, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--accent);
+}
+.prompt-var-desc { margin-left: 3px; }
+.prompt-editor { margin-top: 10px; }
+.prompt-editor-ta {
+  width: 100%;
+  min-height: 180px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg, #fff);
+  color: var(--text);
+  resize: vertical;
+  box-sizing: border-box;
+}
+.prompt-editor .hint { font-size: 12px; align-self: center; }
+
+/* ============ 世界书 ============ */
+.worldbook-item { margin-bottom: 12px; }
+.worldbook-entries {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+.worldbook-entry {
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.worldbook-entry:last-child { border-bottom: none; }
+.worldbook-entry.disabled { opacity: 0.55; }
+.worldbook-entry-key {
+  font-weight: 600;
+  color: var(--accent);
+  font-size: 14px;
+}
+.worldbook-entry-content {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

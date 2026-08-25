@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import generators
+import prompts
 import storage
 from ai_client import AIClientError, PRESET_BASE_URLS, list_models, test_connection
 
@@ -107,6 +108,7 @@ def _ctx(novel: dict | None = None):
         "providers": storage.list_providers(),
         "settings": settings,
         "characters": storage.list_characters(),
+        "worldbooks": storage.list_worldbooks(),
     }
 
 
@@ -308,13 +310,44 @@ def get_settings():
 @app.post("/api/settings")
 def save_settings(body: dict):
     allowed = {"text_model_id", "vision_model_id",
-               "token_ratio", "temperature", "global_prompt"}
+               "token_ratio", "temperature", "global_prompt", "prompts"}
     cur = storage.get_settings()
     for k in allowed:
         if k in body:
             cur[k] = body[k]
     storage.save_settings(cur)
     return cur
+
+
+# ================= 提示词配置 =================
+@app.get("/api/prompts")
+def get_prompts():
+    """返回所有提示词的定义（含默认值）与当前自定义值。"""
+    custom = storage.get_settings().get("prompts") or {}
+    return {
+        "defs": prompts.get_all_defs(),
+        "custom": custom,
+    }
+
+
+@app.post("/api/prompts")
+def save_prompts(body: dict):
+    """保存提示词自定义值。body: {prompts: {key: 模板文本, ...}}。"""
+    new_prompts = (body or {}).get("prompts")
+    if not isinstance(new_prompts, dict):
+        raise HTTPException(400, "参数格式错误")
+    # 只接受已知 key，且过滤空值（空值表示恢复默认）
+    valid_keys = set(prompts.default_prompts().keys())
+    cleaned = {}
+    for k, v in new_prompts.items():
+        if k not in valid_keys:
+            continue
+        if v and str(v).strip():
+            cleaned[k] = str(v).strip()
+    cur = storage.get_settings()
+    cur["prompts"] = cleaned
+    storage.save_settings(cur)
+    return {"prompts": cleaned}
 
 
 # ================= AI 请求日志 =================
@@ -394,6 +427,138 @@ def import_genres(body: dict):
         raise HTTPException(400, "导入数据中没有有效的题材（缺少 name 字段）")
     count = storage.save_genres(valid)
     return {"genres": storage.list_genres(), "imported": count}
+
+
+# ================= 世界书 =================
+def _normalize_worldbook_entry(e: dict) -> dict:
+    """把 SillyTavern 世界书条目规范化为内部结构。"""
+    keys = e.get("key") or e.get("keys") or []
+    if isinstance(keys, str):
+        keys = [k.strip() for k in keys.split(",") if k.strip()]
+    else:
+        keys = [str(k).strip() for k in keys if str(k).strip()]
+    keysecondary = e.get("keysecondary") or []
+    if isinstance(keysecondary, str):
+        keysecondary = [k.strip() for k in keysecondary.split(",") if k.strip()]
+    else:
+        keysecondary = [str(k).strip() for k in keysecondary if str(k).strip()]
+    return {
+        "uid": e.get("uid", 0),
+        "key": keys,
+        "keysecondary": keysecondary,
+        "comment": e.get("comment", ""),
+        "content": e.get("content", ""),
+        "constant": bool(e.get("constant", False)),
+        "selective": bool(e.get("selective", False)),
+        "insertion_order": e.get("insertion_order", 0) or 0,
+        "enabled": bool(e.get("enabled", True)),
+        "position": e.get("position", "before_char") or "before_char",
+        "depth": e.get("depth", 4) or 4,
+        "group": e.get("group", "") or "",
+        "group_weight": e.get("group_weight", 100) if e.get("group_weight") is not None else 100,
+        "case_sensitive": bool(e.get("case_sensitive", False)),
+        "probability": e.get("probability", 100) if e.get("probability") is not None else 100,
+        "useProbability": bool(e.get("useProbability", True)),
+        "logic": e.get("logic", "AND_ANY") or "AND_ANY",
+        "exclude_recursion": bool(e.get("exclude_recursion", False)),
+        "prevent_recursion": bool(e.get("prevent_recursion", False)),
+        "delay_until_recursion": bool(e.get("delay_until_recursion", False)),
+    }
+
+
+def _parse_sillytavern_worldbook(data: dict) -> dict:
+    """解析 SillyTavern 世界书 JSON，返回 {name, description, entries}。
+
+    兼容 entries 为对象（key 为 uid 字符串）或数组两种形式。
+    """
+    if not isinstance(data, dict):
+        raise HTTPException(400, "世界书 JSON 格式错误（顶层应为对象）")
+    raw_entries = data.get("entries")
+    entries = []
+    if isinstance(raw_entries, dict):
+        for k, e in raw_entries.items():
+            if isinstance(e, dict):
+                entries.append(_normalize_worldbook_entry(e))
+    elif isinstance(raw_entries, list):
+        for e in raw_entries:
+            if isinstance(e, dict):
+                entries.append(_normalize_worldbook_entry(e))
+    else:
+        raise HTTPException(400, "世界书缺少有效的 entries 字段")
+    if not entries:
+        raise HTTPException(400, "世界书 entries 为空，没有可导入的条目")
+    name = data.get("worldName") or data.get("name") or ""
+    description = data.get("description") or ""
+    return {"name": name, "description": description, "entries": entries}
+
+
+@app.get("/api/worldbooks")
+def get_worldbooks():
+    return {"worldbooks": storage.list_worldbooks()}
+
+
+@app.post("/api/worldbooks")
+def create_worldbook(body: dict):
+    name = (body or {}).get("name", "").strip()
+    if not name:
+        raise HTTPException(400, "世界书名称不能为空")
+    entries = (body or {}).get("entries", [])
+    if not isinstance(entries, list):
+        entries = []
+    wb_id = storage.save_worldbook({
+        "name": name,
+        "description": (body or {}).get("description", ""),
+        "entries": entries,
+        "created_at": time.time(),
+    })
+    return {"worldbooks": storage.list_worldbooks(), "id": wb_id}
+
+
+@app.put("/api/worldbooks/{wid}")
+def update_worldbook(wid: str, body: dict):
+    wb = storage.get_worldbook(wid)
+    if not wb:
+        raise HTTPException(404, "世界书不存在")
+    if "name" in body:
+        wb["name"] = body["name"]
+    if "description" in body:
+        wb["description"] = body["description"]
+    if "entries" in body:
+        entries = body["entries"]
+        if not isinstance(entries, list):
+            raise HTTPException(400, "entries 应为数组")
+        wb["entries"] = entries
+    storage.save_worldbook(wb)
+    return {"worldbooks": storage.list_worldbooks()}
+
+
+@app.delete("/api/worldbooks/{wid}")
+def delete_worldbook(wid: str):
+    storage.delete_worldbook(wid)
+    return {"worldbooks": storage.list_worldbooks()}
+
+
+@app.post("/api/worldbooks/import")
+def import_worldbook(body: dict):
+    """导入 SillyTavern 世界书 JSON。body: {name?, description?, data: {...}}。"""
+    data = (body or {}).get("data")
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError:
+            raise HTTPException(400, "JSON 解析失败，请检查格式")
+    if not isinstance(data, dict):
+        raise HTTPException(400, "缺少有效的世界书数据")
+    parsed = _parse_sillytavern_worldbook(data)
+    name = (body or {}).get("name", "").strip() or parsed["name"] or "未命名世界书"
+    wb_id = storage.save_worldbook({
+        "name": name,
+        "description": (body or {}).get("description", "").strip() or parsed["description"],
+        "entries": parsed["entries"],
+        "created_at": time.time(),
+    })
+    return {"worldbooks": storage.list_worldbooks(), "id": wb_id,
+            "imported": len(parsed["entries"])}
 
 
 # ================= 角色 =================
@@ -1117,12 +1282,13 @@ def _fragment_sse(nid: str, index: int, body: dict, action: str):
 
 @app.post("/api/novels/{nid}/dialog/stream")
 async def dialog_stream(nid: str, body: dict):
-    """对话模式：作者发言 → AI 流式返回一段 ≤500 字的剧情片段（SSE）。
+    """对话模式：作者发言 → AI 流式返回一段约 word_limit 字的剧情片段（SSE）。
 
     body:
-      text    作者本轮发言（必填）
-      history 可选，编辑重生成时前端传入的对话历史（截断到编辑点）。
-              省略时默认读取 novel.dialog_messages。
+      text        作者本轮发言（必填）
+      word_limit  可选，本轮期望字数（默认 500）。作者可自行指定。
+      history     可选，编辑重生成时前端传入的对话历史（截断到编辑点）。
+                  省略时默认读取 novel.dialog_messages。
 
     重生成场景：前端把历史截断到被编辑消息之前，把编辑后的内容作为 text 传入，
     后端用新历史生成，并在保存时替换（而非追加）该历史之后的旧消息。
@@ -1134,6 +1300,16 @@ async def dialog_stream(nid: str, body: dict):
     user_text = (body or {}).get("text", "").strip()
     if not user_text:
         raise HTTPException(400, "请先输入内容")
+    # 本轮期望字数：作者可指定，缺省 500
+    word_limit = (body or {}).get("word_limit")
+    try:
+        word_limit = int(word_limit) if word_limit not in (None, "") else 500
+    except (TypeError, ValueError):
+        word_limit = 500
+    if word_limit < 50:
+        word_limit = 50
+    if word_limit > 5000:
+        word_limit = 5000
     ctx = _ctx(n)
     history = (body or {}).get("history")
     if history is None:
@@ -1151,7 +1327,7 @@ async def dialog_stream(nid: str, body: dict):
 
     def _producer():
         try:
-            for event in generators.dialog_stream(ctx, n, user_text, history):
+            for event in generators.dialog_stream(ctx, n, user_text, history, word_limit):
                 if event["type"] == "delta":
                     result["content"] += event["content"]
                 q.put(event)
