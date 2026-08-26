@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>织叙-NexTale</title>
-  <link rel="stylesheet" href="style.css?v=20260826d">
+  <link rel="stylesheet" href="style.css?v=20260826j">
 </head>
 <body>
   <header class="topbar">
@@ -12,7 +12,9 @@
     <nav class="tabs" id="main-tabs">
       <button class="tab" data-tab="genres">题材库</button>
       <button class="tab" data-tab="worldbooks">世界书</button>
-      <button class="tab" data-tab="novels">小说创作</button>
+      <button class="tab" data-tab="characters">角色</button>
+      <button class="tab tab-primary" data-tab="novels">✍️ 小说创作</button>
+      <button class="tab" data-tab="library">📚 小说阅读</button>
       <button class="tab" data-tab="logs">日志</button>
     </nav>
     <span class="spacer"></span>
@@ -201,6 +203,95 @@
       <div id="worldbook-list" class="card-list"></div>
     </section>
 
+    <!-- ============ 角色库（视图：列表） ============ -->
+    <section id="view-characters" class="view">
+      <div class="page-head">
+        <h2>角色库</h2>
+        <span class="spacer"></span>
+        <button class="btn primary" onclick="goAddCharacterFromList()">＋ 添加角色</button>
+      </div>
+      <p class="hint">以照片卡片展示全部角色，点击卡片进入详情页查看与编辑。</p>
+      <div id="character-grid" class="char-grid"></div>
+    </section>
+
+    <!-- ============ 添加角色（视图） ============ -->
+    <section id="view-character-new" class="view">
+      <div class="page-head">
+        <button class="btn back-link" onclick="goBackFromCharacter()">← 返回</button>
+        <h2 id="character-new-title">添加角色</h2>
+      </div>
+      <div class="card">
+        <div class="form-grid">
+          <label>角色姓名
+            <input id="c-new-name" placeholder="如 林晚晴">
+          </label>
+          <label>照片（可选）
+            <input id="c-new-photo" type="file" accept="image/*" onchange="onNewPhotoPicked(this)" style="display:none">
+            <div class="photo-picker-row">
+              <button type="button" class="btn" onclick="rePickNewPhoto()">📷 选择照片并裁切</button>
+              <button type="button" class="btn" onclick="analyzeNewPhoto()">✨ AI 分析</button>
+            </div>
+            <div id="c-new-photo-preview" class="photo-preview" style="display:none">
+              <img id="c-new-photo-img" alt="照片预览">
+              <button type="button" class="btn" onclick="rePickNewPhoto()">重新选择</button>
+            </div>
+          </label>
+        </div>
+        <label>外貌
+          <textarea id="c-new-appearance" rows="4" placeholder="如：一袭青衫，眉目如画，气质清冷"></textarea>
+        </label>
+        <label>性格
+          <textarea id="c-new-personality" rows="4" placeholder="如：外冷内热，心思缜密，重情重义"></textarea>
+        </label>
+        <label>背景设定
+          <textarea id="c-new-background" rows="4" placeholder="如：前朝遗孤，隐姓埋名，背负家族血仇"></textarea>
+        </label>
+        <label>补充
+          <textarea id="c-new-notes" rows="3" placeholder="其他补充信息（可选）"></textarea>
+        </label>
+        <div style="margin-top:12px">
+          <button class="btn primary" onclick="saveNewCharacter()">保存角色</button>
+          <button class="btn" onclick="goBackFromCharacter()">取消</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 角色详情（视图：编辑） ============ -->
+    <section id="view-character-detail" class="view">
+      <div class="page-head">
+        <button class="btn back-link" onclick="goBackFromCharacter()">← 返回</button>
+        <h2 id="character-detail-title">角色详情</h2>
+      </div>
+      <div class="char-detail-layout">
+        <div class="char-detail-photo-wrap">
+          <div id="c-detail-photo" class="char-detail-photo"></div>
+          <button class="btn" onclick="uploadDetailPhoto()">✎ 更换照片</button>
+          <button class="btn" onclick="analyzeDetailPhoto()">✨ AI 分析</button>
+        </div>
+        <div class="char-detail-form">
+          <label>角色姓名
+            <input id="c-detail-name" placeholder="角色姓名">
+          </label>
+          <label>外貌
+            <textarea id="c-detail-appearance" rows="4"></textarea>
+          </label>
+          <label>性格
+            <textarea id="c-detail-personality" rows="4"></textarea>
+          </label>
+          <label>背景设定
+            <textarea id="c-detail-background" rows="4"></textarea>
+          </label>
+          <label>补充
+            <textarea id="c-detail-notes" rows="3"></textarea>
+          </label>
+          <div style="margin-top:12px">
+            <button class="btn primary" onclick="saveCharacterDetail()">保存</button>
+            <button class="btn danger" onclick="deleteCharacterDetail()">删除角色</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ============ 日志（视图） ============ -->
     <section id="view-logs" class="view">
       <div class="page-head">
@@ -254,6 +345,17 @@
       </div>
       <div id="novel-list" class="card-list"></div>
       <div id="novel-pagination" class="pagination"></div>
+    </section>
+
+    <!-- ============ 小说阅读页（视图：仅已完结小说） ============ -->
+    <section id="view-library" class="view">
+      <div class="page-head">
+        <h2>小说阅读</h2>
+        <span class="spacer"></span>
+        <button class="btn" onclick="loadLibrary()">刷新</button>
+      </div>
+      <p class="hint">这里只展示已完结的小说，点击「开始阅读」进入阅读模式。</p>
+      <div id="library-list" class="card-list"></div>
     </section>
 
     <!-- ============ 垃圾箱（视图） ============ -->
@@ -329,13 +431,13 @@
           </label>
         </div>
         <label>故事背景（时代/地点/大环境设定）
-          <textarea id="n-background" rows="2" placeholder="如：架空的东方大陆，王朝末年，边关战乱频仍"></textarea>
+          <textarea id="n-background" rows="5" placeholder="如：架空的东方大陆，王朝末年，边关战乱频仍"></textarea>
         </label>
         <label>世界观（力量体系/规则/特殊设定）
-          <textarea id="n-worldbuilding" rows="3" placeholder="如：修仙体系分练气/筑基/金丹/元婴，灵气复苏"></textarea>
+          <textarea id="n-worldbuilding" rows="5" placeholder="如：修仙体系分练气/筑基/金丹/元婴，灵气复苏"></textarea>
         </label>
         <label>写作风格（留空则用默认流畅叙事）
-          <textarea id="n-style" rows="2" placeholder="如：冷峻克制、多短句、白描，参考鲁迅式笔法"></textarea>
+          <textarea id="n-style" rows="5" placeholder="如：冷峻克制、多短句、白描，参考鲁迅式笔法"></textarea>
         </label>
         <label>参考小说文本（粘贴一段想模仿的小说，生成大纲时自动分析其风格）
           <textarea id="n-reference" rows="5" placeholder="粘贴参考小说片段…（可选）"></textarea>
@@ -349,31 +451,9 @@
       <!-- 步骤 3：角色设定 -->
       <div id="step-3" class="step-panel" style="display:none">
         <h3>角色设定</h3>
-        <p class="hint">上传人物照片，AI 自动分析外貌与性格；也可手动补充。角色会自动归入本小说。</p>
-        <div class="form-grid char-form-grid">
-          <label>角色姓名
-            <input id="c-name" placeholder="如 林晚晴">
-          </label>
-          <label>照片（可选）
-            <input id="c-photo" type="file" accept="image/*">
-          </label>
-        </div>
-        <div class="char-form-fields">
-          <label>外貌
-            <textarea id="c-appearance" rows="4" placeholder="如：一袭青衫，眉目如画，气质清冷"></textarea>
-          </label>
-          <label>性格
-            <textarea id="c-personality" rows="4" placeholder="如：外冷内热，心思缜密，重情重义"></textarea>
-          </label>
-          <label>背景设定
-            <textarea id="c-background" rows="4" placeholder="如：前朝遗孤，隐姓埋名，背负家族血仇"></textarea>
-          </label>
-          <label>补充
-            <textarea id="c-notes" rows="3" placeholder="其他补充信息（可选）"></textarea>
-          </label>
-        </div>
-        <button class="btn primary" onclick="addCharacter()">＋ 添加角色</button>
-        <div id="character-list" class="card-list" style="margin-top:16px"></div>
+        <p class="hint">在「角色库」中统一管理角色：上传照片、AI 自动分析外貌与性格。点击卡片进入详情编辑；添加的角色会自动归入本小说。</p>
+        <button class="btn primary" onclick="goAddCharacterFromWizard()">＋ 添加角色</button>
+        <div id="character-list" class="char-grid" style="margin-top:16px"></div>
 
         <h4 style="margin-top:20px">人物关系设定</h4>
         <div id="n-relations" class="relation-list"></div>
@@ -477,6 +557,31 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260826e"></script>
+  <!-- 照片裁剪模态框 -->
+  <div id="crop-overlay" class="crop-overlay">
+    <div class="crop-modal">
+      <div class="crop-modal-head">
+        <span>裁切照片（拖动框移动，拖动四角调整大小）</span>
+        <button type="button" class="btn" onclick="cancelCrop()">✕</button>
+      </div>
+      <div id="crop-stage" class="crop-stage">
+        <img id="crop-image" draggable="false" alt="">
+        <div id="crop-box" class="crop-box" onpointerdown="cropPointerDown(event,'move')">
+          <span class="crop-handle nw" onpointerdown="cropPointerDown(event,'nw')"></span>
+          <span class="crop-handle ne" onpointerdown="cropPointerDown(event,'ne')"></span>
+          <span class="crop-handle sw" onpointerdown="cropPointerDown(event,'sw')"></span>
+          <span class="crop-handle se" onpointerdown="cropPointerDown(event,'se')"></span>
+        </div>
+      </div>
+      <div class="crop-modal-foot">
+        <span class="hint">裁剪后将以 JPEG 保存</span>
+        <span class="spacer"></span>
+        <button type="button" class="btn" onclick="cancelCrop()">取消</button>
+        <button type="button" class="btn primary" onclick="applyCrop()">确认裁切</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=20260826j"></script>
 </body>
 </html>

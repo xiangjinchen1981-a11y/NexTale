@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS novels (
   text_model_id TEXT NOT NULL DEFAULT '',
   mode TEXT NOT NULL DEFAULT 'outline',
   dialog_messages TEXT NOT NULL DEFAULT '[]',
+  worldbuilding_source TEXT NOT NULL DEFAULT 'manual',
   created_at REAL NOT NULL DEFAULT 0,
   deleted_at REAL NOT NULL DEFAULT 0
 );
@@ -151,6 +152,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE novels ADD COLUMN deleted_at REAL NOT NULL DEFAULT 0")
     if "dialog_messages" not in cols:
         conn.execute("ALTER TABLE novels ADD COLUMN dialog_messages TEXT NOT NULL DEFAULT '[]'")
+    if "worldbuilding_source" not in cols:
+        conn.execute("ALTER TABLE novels ADD COLUMN worldbuilding_source TEXT NOT NULL DEFAULT 'manual'")
 
     mcols = {r[1] for r in conn.execute("PRAGMA table_info(models)")}
     if "context_length" not in mcols:
@@ -369,8 +372,9 @@ def save_novels(novels):
             conn.execute(
                 "INSERT OR REPLACE INTO novels (id, title, genre, style, reference_text, character_ids, "
                 "relationships, chapter_count, words_per_chapter, summary, worldbuilding, background, "
-                "progress_summary, status, text_model_id, mode, dialog_messages, created_at, deleted_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "progress_summary, status, text_model_id, mode, dialog_messages, worldbuilding_source, "
+                "created_at, deleted_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (nid, n.get("title", ""), n.get("genre", ""), n.get("style", ""),
                  n.get("reference_text", ""), json.dumps(n.get("character_ids", [])),
                  json.dumps(n.get("relationships", [])), n.get("chapter_count", 10),
@@ -378,6 +382,7 @@ def save_novels(novels):
                  n.get("worldbuilding", ""), n.get("background", ""), n.get("progress_summary", ""),
                  n.get("status", "draft"), n.get("text_model_id", ""),
                  n.get("mode", "outline"), json.dumps(n.get("dialog_messages", [])),
+                 n.get("worldbuilding_source", "manual"),
                  n.get("created_at", 0), n.get("deleted_at", 0)),
             )
             # 重建本章节（先删后插，保证与传入数据一致）

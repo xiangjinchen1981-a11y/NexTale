@@ -606,7 +606,7 @@ def delete_character(cid: str):
 
 @app.post("/api/characters/{cid}/photo")
 async def upload_photo(cid: str, file: UploadFile = File(...)):
-    """上传照片并（可选）用视觉模型分析外貌性格。analyze 参数控制是否分析。"""
+    """上传角色照片（仅保存，不做 AI 分析）。AI 分析请调用 /api/analyze-character-photo。"""
     data = await file.read()
     if not data:
         raise HTTPException(400, "文件为空")
@@ -627,29 +627,24 @@ async def upload_photo(cid: str, file: UploadFile = File(...)):
     if not target:
         raise HTTPException(404, "角色不存在")
     storage.save_characters(chars)
+    return {"character": target}
 
-    result = {"character": target}
-    # 若配置了视觉模型，则自动分析外貌与性格
+
+@app.post("/api/analyze-character-photo")
+async def analyze_character_photo(file: UploadFile = File(...)):
+    """分析人物照片（外貌/穿着/性格），返回 {appearance, personality}，不落库、不保存照片，由前端确认后自行保存。"""
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "文件为空")
+    ctx = _ctx()
+    if not ctx["settings"].get("vision_model_id"):
+        raise HTTPException(400, "未配置视觉模型，请先在「配置」页添加并选用视觉模型")
     try:
-        ctx = _ctx()
-        if ctx["settings"].get("vision_model_id"):
-            b64 = base64.b64encode(data).decode()
-            analysis = generators.analyze_photo(ctx, b64)
-            for c in chars:
-                if c.get("id") == cid:
-                    c["appearance"] = analysis["appearance"]
-                    c["personality"] = analysis["personality"]
-            storage.save_characters(chars)
-            target.update(analysis)
-            result["character"] = target
-            result["analyzed"] = True
-        else:
-            result["analyzed"] = False
-            result["analyze_error"] = "未配置视觉模型"
+        b64 = base64.b64encode(data).decode()
+        analysis = generators.analyze_photo(ctx, b64)
     except AIClientError as e:
-        result["analyzed"] = False
-        result["analyze_error"] = str(e)
-    return result
+        raise HTTPException(400, f"AI 分析失败：{e}")
+    return {"appearance": analysis["appearance"], "personality": analysis["personality"]}
 
 
 # ================= 小说 =================
@@ -683,7 +678,8 @@ def create_novel(body: dict):
         "chapter_count": max(1, int(body.get("chapter_count", 10))),
         "words_per_chapter": max(200, int(body.get("words_per_chapter", 2000))),
         "summary": "",
-        "worldbuilding": "",
+        "worldbuilding": body.get("worldbuilding", "").strip(),
+        "worldbuilding_source": "manual",
         "background": body.get("background", ""),
         "chapters": [],
         "progress_summary": "",
@@ -740,6 +736,9 @@ def update_novel(nid: str, body: dict):
         for k in editable:
             if k in body:
                 n[k] = body[k]
+        if "worldbuilding" in body:
+            # 用户手动编辑/填写世界观 → 标记为 manual，生成大纲时不再被 AI 覆盖
+            n["worldbuilding_source"] = "manual"
         if "chapter_count" in body:
             n["chapter_count"] = max(1, int(body["chapter_count"]))
         if "words_per_chapter" in body:
@@ -815,7 +814,12 @@ def prepare_novel(nid: str):
         outline = generators.generate_outline(ctx, n)
         def mut(m):
             m["summary"] = outline["summary"]
-            m["worldbuilding"] = outline["worldbuilding"]
+            # 世界观覆盖规则：
+            #   - 用户手动填写过（source=manual 且非空）→ 保留用户内容，不被 AI 覆盖
+            #   - 空世界观 或 由 AI 生成过（source=ai）→ 使用（或更新为）AI 新生成的世界观
+            if (m.get("worldbuilding_source") != "manual" or not (m.get("worldbuilding") or "").strip()):
+                m["worldbuilding"] = outline["worldbuilding"]
+                m["worldbuilding_source"] = "ai"
             m["chapters"] = outline["chapters"]
             m["style"] = n.get("style", m.get("style", ""))
             m["status"] = "outlined"

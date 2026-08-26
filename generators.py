@@ -106,11 +106,20 @@ def generate_outline(context, novel):
     characters_info = _format_characters(context, novel)
     relationships_info = _format_relationships(context, novel)
     style = novel.get("style") or "文笔流畅自然，情节紧凑，人物鲜明。"
+    background = novel.get("background") or ""
+    worldbuilding = novel.get("worldbuilding") or ""
+    reference = novel.get("reference_text") or ""
+    # 参考文本只作补充素材，截断避免撑爆上下文
+    if reference:
+        reference = _truncate_text(reference, 6000)
 
     prompt = get_prompt(context, "generate_outline").format(
         title=novel.get("title") or "未命名",
         genre=novel.get("genre") or "不限",
         style=style,
+        background=background or "（暂无背景设定）",
+        world=worldbuilding or "（暂无世界观设定）",
+        reference=reference or "（无）",
         chapter_count=novel.get("chapter_count", 10),
         words_per_chapter=novel.get("words_per_chapter", 2000),
         characters=characters_info,
@@ -153,6 +162,7 @@ def _chapter_prompt_and_params(context, novel, chapter_index):
 
     genre = novel.get("genre") or "不限"
     worldbuilding = novel.get("worldbuilding") or ""
+    background = novel.get("background") or ""
 
     # 参考文本（原著片段）：截断到 2000 字，避免撑爆上下文
     reference = novel.get("reference_text") or ""
@@ -164,6 +174,7 @@ def _chapter_prompt_and_params(context, novel, chapter_index):
         n=chapter_index,
         genre=genre,
         summary=novel.get("summary") or "（暂无）",
+        background=background or "（暂无背景设定）",
         world=worldbuilding or "（暂无世界观设定）",
         outline=_format_outline(chapters),
         ctitle=chapter.get("title", ""),
