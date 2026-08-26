@@ -1346,6 +1346,7 @@ async function loadNovels() {
   state.novels = d.novels;
   novelPage = 1;
   renderNovelFilterOptions();
+  renderModeFilterOptions();
   renderNovels();
 }
 
@@ -1368,6 +1369,17 @@ function renderNovelFilterOptions() {
   sel.value = cur || '';
 }
 
+// 填充创作模式筛选下拉框（由 NOVEL_MODES 驱动，与列表显示名保持一致）
+function renderModeFilterOptions() {
+  const sel = $('novel-mode-filter');
+  if (!sel) return;
+  const cur = sel.value;
+  const opts = ['<option value="">全部</option>'];
+  NOVEL_MODES.forEach(m => opts.push(`<option value="${m.value}">${m.label}</option>`));
+  sel.innerHTML = opts.join('');
+  sel.value = cur || '';
+}
+
 // 状态显示名
 function statusLabel(s) {
   return { 'draft': '草稿', 'outlined': '已生成大纲', 'generating': '生成中', 'done': '已完成', 'finished': '已完结' }[s] || s;
@@ -1377,9 +1389,19 @@ function statusLabel(s) {
 let novelPage = 1;
 const NOVEL_PAGE_SIZE = 5;
 
+// 创作模式定义（单一数据源）：新增模式时在此追加，列表筛选框与显示名自动保持一致
+const NOVEL_MODES = [
+  { value: 'outline', label: '大纲' },
+  { value: 'improv', label: '即兴' },
+  { value: 'dialog', label: '对话' },
+  { value: 'rewrite', label: '改写' },
+  { value: 'continue', label: '续写' },
+];
+
 // 创作模式显示名
 function modeLabel(m) {
-  return { 'outline': '大纲', 'improv': '即兴', 'dialog': '对话', 'rewrite': '改写', 'continue': '续写' }[m] || '大纲';
+  const item = NOVEL_MODES.find(x => x.value === m);
+  return item ? item.label : '大纲';
 }
 
 // 渲染一个小说卡片（供列表与垃圾箱复用）
