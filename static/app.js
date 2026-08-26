@@ -1040,7 +1040,7 @@ function novelCardHTML(n) {
       <div class="meta">${esc(n.genre || '未设题材')} · ${n.chapter_count}章 · ${n.words_per_chapter}字/章 · 角色${(n.character_ids || []).length} · 已生成 ${genCount} 章 · 模型${n.text_model_id ? esc(modelLabel(n.text_model_id)) : '（全局）'}</div>
       <div class="row" style="margin-top:10px">
         ${genCount > 0 ? `<button class="btn" onclick="nav('#/novels/${n.id}/read')">阅读</button>` : ''}
-        <button class="btn" onclick="exportNovel('${n.id}')">导出</button>
+        <button class="btn" onclick="exportNovel('${n.id}', 'md')">导出 MD</button>
         <button class="btn" onclick="reopenNovel('${n.id}')">重开</button>
         <span class="spacer"></span>
         <button class="btn danger" onclick="deleteNovel('${n.id}')">删除</button>
@@ -1061,7 +1061,7 @@ function novelCardHTML(n) {
       ${primaryBtn}
       ${genCount > 0 ? `<button class="btn" onclick="nav('#/novels/${n.id}/read')">阅读</button>` : ''}
       <button class="btn" onclick="nav('#/novels/${n.id}/edit')">编辑设定</button>
-      <button class="btn" onclick="exportNovel('${n.id}')">导出</button>
+      <button class="btn" onclick="exportNovel('${n.id}', 'md')">导出 MD</button>
       <button class="btn" onclick="finishNovel('${n.id}')">完结</button>
       <span class="spacer"></span>
       <button class="btn danger" onclick="deleteNovel('${n.id}')">删除</button>
@@ -2148,6 +2148,14 @@ function renderChapterPage(index) {
     </div>`;
   }
 
+  // 历史版本按钮（仅当章节有内容时显示）
+  if (!isFinished && chapter.content) {
+    html += `<div style="margin:8px 0 16px">
+      <button class="btn" onclick="toggleChapterHistory(${index})">📜 历史版本</button>
+    </div>`;
+  }
+  html += `<div id="chapter-history-panel" style="display:none; margin:8px 0 16px"></div>`;
+
   // 生成实时输出区（默认隐藏）
   html += `<div id="chapter-gen-panel" style="display:none"></div>`;
 
@@ -2399,6 +2407,73 @@ async function deleteChapter(index) {
   } catch (e) { toast(e.message, 'err'); }
 }
 
+// ---- Chapter Version History ----
+
+let historyPanelVisible = false;
+
+async function toggleChapterHistory(index) {
+  const panel = $('chapter-history-panel');
+  if (!panel) return;
+  if (historyPanelVisible) {
+    panel.style.display = 'none';
+    historyPanelVisible = false;
+    return;
+  }
+  historyPanelVisible = true;
+  panel.style.display = 'block';
+  panel.innerHTML = '<div class="meta">加载中...</div>';
+  try {
+    const n = state.novel;
+    const d = await api(`/api/novels/${n.id}/chapter/${index}/history`);
+    renderHistoryList(index, d.versions || []);
+  } catch (e) {
+    panel.innerHTML = `<div class="meta" style="color:#e74c3c">${esc(e.message)}</div>`;
+  }
+}
+
+function renderHistoryList(index, versions) {
+  const panel = $('chapter-history-panel');
+  if (!panel) return;
+  if (!versions.length) {
+    panel.innerHTML = '<div class="meta">暂无历史版本（编辑或重新生成后会自动保存快照）</div>';
+    return;
+  }
+  let html = '<div class="meta" style="margin-bottom:8px">历史版本（点击「回退」可恢复到该版本）</div>';
+  for (const v of versions) {
+    const ts = new Date(v.created_at * 1000).toLocaleString('zh-CN');
+    const preview = (v.content || '').substring(0, 50);
+    const sourceLabel = v.source === 'ai' ? 'AI生成' : '手动编辑';
+    html += `<div class="card" style="padding:12px; margin:8px 0">
+      <div class="row" style="align-items:center">
+        <span class="meta">${ts}</span>
+        <span class="badge" style="margin-left:8px">${esc(sourceLabel)}</span>
+        <span class="spacer"></span>
+        <span class="meta">${v.word_count || 0} 字</span>
+      </div>
+      <div class="meta" style="margin:6px 0">${esc(preview)}${v.content && v.content.length > 50 ? '...' : ''}</div>
+      <button class="btn" onclick="revertToVersion(${index}, '${v.id}')">↩ 回退到此版本</button>
+    </div>`;
+  }
+  panel.innerHTML = html;
+}
+
+async function revertToVersion(index, versionId) {
+  if (!confirm('确定回退到该版本吗？当前内容将被覆盖。')) return;
+  try {
+    const n = state.novel;
+    const d = await api(`/api/novels/${n.id}/chapter/${index}/revert`, {
+      method: 'POST',
+      body: JSON.stringify({ version_id: versionId }),
+    });
+    state.novel = d.novel;
+    historyPanelVisible = false;
+    const panel = $('chapter-history-panel');
+    if (panel) panel.style.display = 'none';
+    renderChapterPage(index);
+    toast('已回退到指定版本', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
 function addRelation() {
   const rel = { char1_id: '', char2_id: '', type: '', description: '' };
   state.relations.push(rel);
@@ -2451,7 +2526,12 @@ function renderWorkspace() {
   html += `<div style="margin-top:16px">
     <button class="btn primary" onclick="prepareNovel()">${n.summary ? '重新生成大纲' : '① 生成大纲'}</button>
     ${n.chapters && n.chapters.length ? `<button class="btn primary" onclick="generateAll()">② 逐章生成全文（${total} 章）</button>` : ''}
-    <button class="btn" onclick="exportNovel('${n.id}')">导出 Markdown</button>
+    <select id="export-format" style="padding:4px 8px; border-radius:4px; border:1px solid #ccc">
+      <option value="md">Markdown</option>
+      <option value="txt">TXT 纯文本</option>
+      <option value="epub">EPUB 电子书</option>
+    </select>
+    <button class="btn" onclick="exportNovel('${n.id}', document.getElementById('export-format').value)">导出</button>
     ${n.summary ? (outlineEditing
       ? `<button class="btn primary" onclick="saveOutline()">保存大纲</button>
          <button class="btn" onclick="toggleOutlineEdit()">取消</button>`
@@ -2724,16 +2804,17 @@ async function generateAll() {
   toast('全部章节生成完成', 'ok');
 }
 
-async function exportNovel(id) {
+async function exportNovel(id, format) {
   try {
     const headers = {};
     if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
-    const res = await fetch(`/api/novels/${id}/export`, { headers });
+    const fmt = format || 'md';
+    const res = await fetch(`/api/novels/${id}/export?format=${fmt}`, { headers });
     if (res.status === 401) { handleUnauthorized(); return; }
     if (!res.ok) { toast('导出失败', 'err'); return; }
     const blob = await res.blob();
     // 从 Content-Disposition 解析文件名
-    let fname = 'novel.md';
+    let fname = 'novel.' + fmt;
     const cd = res.headers.get('Content-Disposition') || '';
     const m = cd.match(/filename\*=UTF-8''(.+)/) || cd.match(/filename="?([^";]+)"?/);
     if (m) { try { fname = decodeURIComponent(m[1]); } catch (e) { fname = m[1]; } }

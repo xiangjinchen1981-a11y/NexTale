@@ -837,6 +837,8 @@ def update_one_chapter(nid: str, index: int, body: dict):
         raise HTTPException(400, "尚未生成大纲")
     if index < 1 or index > len(n["chapters"]):
         raise HTTPException(400, f"章节序号越界（1~{len(n['chapters'])}）")
+    # 快照旧版本
+    storage.snapshot_chapter(nid, index, "manual")
     editable = {"title", "summary", "content"}
     def mut(m):
         for ch in m["chapters"]:
@@ -944,6 +946,8 @@ def generate_one_chapter(nid: str, index: int):
         raise HTTPException(400, "尚未生成大纲，请先点击「生成大纲」")
     if index < 1 or index > len(n["chapters"]):
         raise HTTPException(400, f"章节序号越界（1~{len(n['chapters'])}）")
+    # 生成前快照旧版本
+    storage.snapshot_chapter(nid, index, source="ai")
     ctx = _ctx(n)
     try:
         chapter, csummary = generators.generate_chapter(ctx, n, index)
@@ -985,6 +989,8 @@ async def stream_one_chapter(nid: str, index: int):
         raise HTTPException(400, "尚未生成大纲，请先点击「生成大纲」")
     if index < 1 or index > len(n["chapters"]):
         raise HTTPException(400, f"章节序号越界（1~{len(n['chapters'])}）")
+    # 生成前快照旧版本
+    storage.snapshot_chapter(nid, index, source="ai")
     ctx = _ctx(n)
 
     def sse(event: dict) -> str:
@@ -1103,6 +1109,8 @@ async def improv_stream(nid: str, body: dict):
             raise HTTPException(400, "章节序号无效")
         if index < 1 or index > len(n.get("chapters", [])):
             raise HTTPException(400, f"章节序号越界（1~{len(n.get('chapters', []))}）")
+        # 重新生成前快照旧版本
+        storage.snapshot_chapter(nid, index, source="ai")
         # 重新生成时只允许引用本章之前的章节（防止把本章/后文内容带入）
         context_chapters = [
             r for r in context_chapters
@@ -1477,12 +1485,76 @@ async def dialog_to_chapter(nid: str, body: dict):
             "content": content, "summary": summary, "word_count": chapter["word_count"]}
 
 
-@app.get("/api/novels/{nid}/export")
-def export_novel(nid: str):
+# ================= 章节版本历史 =================
+
+@app.get("/api/novels/{nid}/chapter/{index}/history")
+def get_chapter_history(nid: str, index: int):
+    """返回某章节的历史版本列表。"""
     n = storage.get_novel(nid)
     if not n:
         raise HTTPException(404, "小说不存在")
-    lines = [f"# {n.get('title')}", ""]
+    versions = storage.list_chapter_versions(nid, index)
+    return {"versions": versions}
+
+
+@app.get("/api/novels/{nid}/chapter/{index}/history/{vid}")
+def get_chapter_version_detail(nid: str, index: int, vid: str):
+    """返回单个历史版本详情。"""
+    v = storage.get_chapter_version(vid)
+    if not v or v["novel_id"] != nid or v["chapter_idx"] != index:
+        raise HTTPException(404, "版本不存在")
+    return {"version": v}
+
+
+@app.post("/api/novels/{nid}/chapter/{index}/revert")
+def revert_chapter(nid: str, index: int, body: dict):
+    """回退到指定历史版本。body: {version_id}"""
+    vid = (body or {}).get("version_id", "")
+    if not vid:
+        raise HTTPException(400, "缺少 version_id")
+    v = storage.get_chapter_version(vid)
+    if not v or v["novel_id"] != nid or v["chapter_idx"] != index:
+        raise HTTPException(404, "版本不存在")
+
+    def mut(m):
+        for ch in m["chapters"]:
+            if ch.get("index") == index:
+                ch["title"] = v["title"]
+                ch["summary"] = v["summary"]
+                ch["content"] = v["content"]
+                ch["word_count"] = v["word_count"]
+                break
+
+    n = storage.update_novel(nid, mut)
+    if not n:
+        raise HTTPException(404, "小说不存在")
+    return {"novel": n}
+
+
+@app.get("/api/novels/{nid}/export")
+def export_novel(nid: str, format: str = "md"):
+    """导出小说，支持 md / txt / epub 格式。"""
+    n = storage.get_novel(nid)
+    if not n:
+        raise HTTPException(404, "小说不存在")
+
+    fmt = (format or "md").lower().strip()
+    if fmt not in ("md", "txt", "epub"):
+        raise HTTPException(400, f"不支持的导出格式：{format}")
+
+    title = n.get("title", "novel")
+    ts = int(time.time())
+
+    if fmt == "md":
+        return _export_md(n, title, ts)
+    elif fmt == "txt":
+        return _export_txt(n, title, ts)
+    else:
+        return _export_epub(n, title, ts)
+
+
+def _export_md(n, title, ts):
+    lines = [f"# {title}", ""]
     if n.get("summary"):
         lines += ["## 故事梗概", n["summary"], ""]
     if n.get("worldbuilding"):
@@ -1495,11 +1567,223 @@ def export_novel(nid: str):
             lines += [f"## 第{ch['index']}章 {ch.get('title','').strip()}", "",
                       ch["content"], ""]
     text = "\n".join(lines)
-    fname = f"{n.get('title','novel')}_v{int(time.time())}.md"
+    fname = f"{title}_v{ts}.md"
     out_path = storage.OUTPUT_DIR / fname
     out_path.write_text(text, encoding="utf-8")
-    return FileResponse(out_path, filename=fname,
-                        media_type="text/markdown")
+    return FileResponse(out_path, filename=fname, media_type="text/markdown")
+
+
+def _strip_markdown(text):
+    """去掉 Markdown 标记，保留纯文本。"""
+    import re as _re
+    # 标题
+    text = _re.sub(r'^#{1,6}\s+', '', text, flags=_re.MULTILINE)
+    # 粗体/斜体
+    text = _re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+    text = _re.sub(r'\*(.+?)\*', r'\1', text)
+    # 引用块标记
+    text = _re.sub(r'^>\s*', '', text, flags=_re.MULTILINE)
+    # 多余空行压缩
+    text = _re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
+def _export_txt(n, title, ts):
+    lines = [title, "=" * len(title), ""]
+    if n.get("summary"):
+        lines += ["【故事梗概】", n["summary"], ""]
+    if n.get("worldbuilding"):
+        lines += ["【世界观】", n["worldbuilding"], ""]
+    lines += [f"题材：{n.get('genre') or '不限'}",
+              f"章节数：{n.get('chapter_count')}",
+              f"每章字数目标：{n.get('words_per_chapter')}", ""]
+    for ch in n.get("chapters", []):
+        if ch.get("content"):
+            lines += [f"第{ch['index']}章 {ch.get('title','').strip()}",
+                      "-" * 40,
+                      _strip_markdown(ch["content"]), ""]
+    text = "\n".join(lines)
+    fname = f"{title}_v{ts}.txt"
+    out_path = storage.OUTPUT_DIR / fname
+    out_path.write_text(text, encoding="utf-8")
+    return FileResponse(out_path, filename=fname, media_type="text/plain")
+
+
+def _escape_xml(s):
+    """转义 XML 特殊字符。"""
+    s = s.replace("&", "&amp;")
+    s = s.replace("<", "&lt;")
+    s = s.replace(">", "&gt;")
+    s = s.replace('"', "&quot;")
+    s = s.replace("'", "&apos;")
+    return s
+
+
+def _export_epub(n, title, ts):
+    """构造 EPUB 2.0 格式的 ZIP 文件（纯 Python，无外部依赖）。"""
+    import zipfile
+    import io
+
+    chapters_with_content = [ch for ch in n.get("chapters", []) if ch.get("content")]
+    if not chapters_with_content:
+        raise HTTPException(400, "没有可导出的章节内容")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # mimetype 必须第一个且未压缩
+        zf.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+
+        # META-INF/container.xml
+        container_xml = '''<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>'''
+        zf.writestr("META-INF/container.xml", container_xml.encode("utf-8"))
+
+        # OEBPS/style.css
+        css = '''body { font-family: serif; line-height: 1.8; margin: 1em 2em; }
+h1 { text-align: center; margin: 2em 0 1em; }
+h2 { margin: 1.5em 0 0.5em; }
+p { text-indent: 2em; margin: 0.5em 0; }
+.meta { color: #666; font-size: 0.9em; margin-bottom: 1em; }
+.chapter-break { page-break-before: always; }
+'''
+        zf.writestr("OEBPS/style.css", css.encode("utf-8"))
+
+        # 前导页（梗概 + 世界观）
+        intro_xhtml = _build_intro_xhtml(n, title)
+        zf.writestr("OEBPS/intro.xhtml", intro_xhtml.encode("utf-8"))
+
+        # 各章节 XHTML
+        chapter_files = []
+        for ch in chapters_with_content:
+            xhtml = _build_chapter_xhtml(ch)
+            fname = f"OEBPS/chapter_{ch['index']:03d}.xhtml"
+            zf.writestr(fname, xhtml.encode("utf-8"))
+            chapter_files.append((ch, fname))
+
+        # content.opf
+        opf = _build_opf(n, title, chapter_files)
+        zf.writestr("OEBPS/content.opf", opf.encode("utf-8"))
+
+        # toc.ncx
+        ncx = _build_ncx(n, title, chapter_files)
+        zf.writestr("OEBPS/toc.ncx", ncx.encode("utf-8"))
+
+    buf.seek(0)
+    fname = f"{title}_v{ts}.epub"
+    out_path = storage.OUTPUT_DIR / fname
+    out_path.write_bytes(buf.read())
+    return FileResponse(out_path, filename=fname, media_type="application/epub+zip")
+
+
+def _build_intro_xhtml(n, title):
+    parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">',
+        '<html xmlns="http://www.w3.org/1999/xhtml">',
+        '<head><title>' + _escape_xml(title) + '</title>',
+        '<link rel="stylesheet" type="text/css" href="style.css"/></head>',
+        '<body>',
+        '<h1>' + _escape_xml(title) + '</h1>',
+    ]
+    if n.get("summary"):
+        parts += ['<div class="meta"><h2>故事梗概</h2>',
+                  '<p>' + _escape_xml(n["summary"]) + '</p></div>']
+    if n.get("worldbuilding"):
+        parts += ['<div class="meta"><h2>世界观</h2>',
+                  '<p>' + _escape_xml(n["worldbuilding"]) + '</p></div>']
+    genre = n.get("genre") or "不限"
+    parts += [f'<div class="meta"><p>题材：{_escape_xml(genre)}</p>',
+              f'<p>章节数：{n.get("chapter_count", "")}</p>',
+              f'<p>每章字数目标：{n.get("words_per_chapter", "")}</p></div>',
+              '</body></html>']
+    return "\n".join(parts)
+
+
+def _build_chapter_xhtml(ch):
+    title = ch.get("title", "").strip() or f"第{ch['index']}章"
+    parts = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">',
+        '<html xmlns="http://www.w3.org/1999/xhtml">',
+        '<head><title>' + _escape_xml(title) + '</title>',
+        '<link rel="stylesheet" type="text/css" href="style.css"/></head>',
+        '<body class="chapter-break">',
+        '<h2>' + _escape_xml(title) + '</h2>',
+    ]
+    content = ch.get("content", "")
+    # 按段落分割
+    paragraphs = [p.strip() for p in content.split("\n\n") if p.strip()]
+    for p in paragraphs:
+        parts.append('<p>' + _escape_xml(p) + '</p>')
+    parts += ['</body></html>']
+    return "\n".join(parts)
+
+
+def _build_opf(n, title, chapter_files):
+    uid = f"urn:noveltale:{n.get('id', 'unknown')}"
+    items = [
+        f'    <item id="intro" href="intro.xhtml" media-type="application/xhtml+xml"/>',
+    ]
+    spine = [
+        '    <itemref idref="intro"/>',
+    ]
+    manifest_items = []
+    for ch, fname in chapter_files:
+        fid = f"chapter_{ch['index']:03d}"
+        items.append(f'    <item id="{fid}" href="{fname.split("/")[-1]}" media-type="application/xhtml+xml"/>')
+        spine.append(f'    <itemref idref="{fid}"/>')
+
+    opf = f'''<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="BookId">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+    <dc:title>{_escape_xml(title)}</dc:title>
+    <dc:creator>织叙-NexTale</dc:creator>
+    <dc:language>zh-CN</dc:language>
+    <dc:identifier id="BookId">{uid}</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="css" href="style.css" media-type="text/css"/>
+{chr(10).join(items)}
+  </manifest>
+  <spine toc="ncx">
+{chr(10).join(spine)}
+  </spine>
+</package>'''
+    return opf
+
+
+def _build_ncx(n, title, chapter_files):
+    uid = f"urn:noveltale:{n.get('id', 'unknown')}"
+    nav_points = [
+        f'''    <navPoint id="intro" playOrder="1">
+      <navLabel><text>简介</text></navLabel>
+      <content src="intro.xhtml"/>
+    </navPoint>''',
+    ]
+    for i, (ch, fname) in enumerate(chapter_files, start=2):
+        label = ch.get("title", "").strip() or f"第{ch['index']}章"
+        nav_points.append(f'''    <navPoint id="chapter_{ch['index']:03d}" playOrder="{i}">
+      <navLabel><text>{_escape_xml(label)}</text></navLabel>
+      <content src="{fname.split('/')[-1]}"/>
+    </navPoint>''')
+
+    ncx = f'''<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <head>
+    <meta name="dtb:uid" content="{uid}"/>
+    <meta name="dtb:depth" content="1"/>
+  </head>
+  <docTitle><text>{_escape_xml(title)}</text></docTitle>
+  <navMap>
+{chr(10).join(nav_points)}
+  </navMap>
+</ncx>'''
+    return ncx
 
 
 # ================= 静态资源 =================

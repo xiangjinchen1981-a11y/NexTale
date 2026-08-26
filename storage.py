@@ -120,9 +120,21 @@ CREATE TABLE IF NOT EXISTS worldbooks (
   entries TEXT NOT NULL DEFAULT '[]',
   created_at REAL NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS chapter_versions (
+  id TEXT PRIMARY KEY,
+  novel_id TEXT NOT NULL,
+  chapter_idx INTEGER NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  summary TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  word_count INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'manual',
+  created_at REAL NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_models_provider ON models(provider_id);
 CREATE INDEX IF NOT EXISTS idx_chapters_novel ON chapters(novel_id, idx);
 CREATE INDEX IF NOT EXISTS idx_logs_created ON request_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_chapter_versions ON chapter_versions(novel_id, chapter_idx);
 """
 
 
@@ -638,6 +650,68 @@ def delete_worldbook(wb_id):
     conn = _connect()
     try:
         conn.execute("DELETE FROM worldbooks WHERE id = ?", (wb_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ---- Chapter Version History ----
+
+def snapshot_chapter(novel_id, chapter_idx, source="manual"):
+    """把当前章节内容快照到 chapter_versions（仅当有 content 时）。"""
+    n = get_novel(novel_id)
+    if not n:
+        return None
+    ch = next((c for c in n.get("chapters", []) if c.get("index") == chapter_idx), None)
+    if not ch or not ch.get("content"):
+        return None
+    conn = _connect()
+    try:
+        vid = new_id()
+        conn.execute(
+            "INSERT INTO chapter_versions (id, novel_id, chapter_idx, title, summary, "
+            "content, word_count, source, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (vid, novel_id, chapter_idx, ch.get("title", ""), ch.get("summary", ""),
+             ch["content"], ch.get("word_count", 0), source, time.time()),
+        )
+        conn.commit()
+        return vid
+    finally:
+        conn.close()
+
+
+def list_chapter_versions(novel_id, chapter_idx):
+    """返回某章节的历史版本列表（按时间倒序）。"""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM chapter_versions WHERE novel_id=? AND chapter_idx=? ORDER BY created_at DESC",
+            (novel_id, chapter_idx),
+        )
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_chapter_version(version_id):
+    """返回单个版本详情。"""
+    conn = _connect()
+    try:
+        r = conn.execute("SELECT * FROM chapter_versions WHERE id=?", (version_id,)).fetchone()
+        return dict(r) if r else None
+    finally:
+        conn.close()
+
+
+def delete_chapter_versions(novel_id, chapter_idx=None):
+    """删除指定章节（或全部）的历史版本。"""
+    conn = _connect()
+    try:
+        if chapter_idx is not None:
+            conn.execute("DELETE FROM chapter_versions WHERE novel_id=? AND chapter_idx=?",
+                         (novel_id, chapter_idx))
+        else:
+            conn.execute("DELETE FROM chapter_versions WHERE novel_id=?", (novel_id,))
         conn.commit()
     finally:
         conn.close()
