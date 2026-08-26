@@ -722,4 +722,172 @@ def dialog_stream(context, novel, user_text, history, word_limit=500):
         yield {"type": "delta", "content": delta}
 
 
+# ---------- 改写 / 续写模式（导入已有小说） ----------
+
+_CHAPTER_MARKER = re.compile(
+    r"^\s*(第\s*[0-9零一二三四五六七八九十百千万两]+\s*[章回节卷部篇集])"
+    r"|^\s*(?:[Cc]hapter\s+\d+|第\s*\d+\s*[章回节卷部篇集])",
+    re.M,
+)
+
+
+def split_source_chapters(source_text, words_per_chapter=2000):
+    """把导入的原文切分为章节列表。
+
+    优先按章节标记（第X章 / 第X回 / Chapter X 等）切分，标记行作为标题；
+    无标记时按每章目标字数切分。返回
+        [{index, title, summary, content, word_count}, ...]
+    """
+    text = (source_text or "").strip()
+    if not text:
+        return []
+
+    matches = list(_CHAPTER_MARKER.finditer(text))
+    blocks = []
+    if len(matches) >= 2:
+        # 标记行之前的前言（若有）并入第一个章节正文之前
+        preamble = text[:matches[0].start()].strip()
+        for i, m in enumerate(matches):
+            start = m.start()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            block = text[start:end].strip()
+            title_line, _, body = block.partition("\n")
+            title = title_line.strip()
+            if i == 0 and preamble:
+                body = preamble + "\n\n" + body
+            blocks.append({"title": title, "content": body.strip()})
+    else:
+        # 无章节标记，按目标字数切分
+        step = max(int(words_per_chapter or 2000), 500)
+        idx = 0
+        while idx < len(text):
+            blocks.append({"title": "", "content": text[idx:idx + step].strip()})
+            idx += step
+
+    chapters = []
+    for i, b in enumerate(blocks, 1):
+        chapters.append({
+            "index": i,
+            "title": b["title"] or f"第{i}段",
+            "summary": "",
+            "content": b["content"],
+            "word_count": _count_chinese(b["content"]),
+        })
+    return chapters
+
+
+def _rewrite_prompt(context, novel, chapter_index):
+    """构造改写单章的 prompt（按任务要求改写该章原文）。"""
+    provider, model, mcfg = _resolve(context, "text")
+    chapters = novel.get("chapters", [])
+    if chapter_index < 1 or chapter_index > len(chapters):
+        raise AIClientError("章节序号越界")
+    chapter = chapters[chapter_index - 1]
+    instruction = (novel.get("task_instruction") or chapter.get("instruction") or "").strip() \
+        or "保持原意，优化语言表达，提升文学性。"
+    text = (chapter.get("content") or "").strip()
+    if not text:
+        raise AIClientError("本章原文为空，请先导入原文并完成切分")
+
+    chars = _format_characters(context, novel)
+    style = novel.get("style") or "文笔流畅自然。"
+    worldbuilding = novel.get("worldbuilding") or "（暂无世界观设定）"
+    background = novel.get("background") or "（暂无背景设定）"
+
+    prompt = get_prompt(context, "rewrite_chapter").format(
+        title=novel.get("title") or "未命名",
+        n=chapter_index,
+        instruction=instruction,
+        text=_truncate_text(text, 8000),
+        style=style,
+        world=worldbuilding,
+        chars=chars,
+        background=background,
+    )
+    wb_context = f"{chapter.get('title', '')} {text[:500]} {instruction}"
+    wb_text = _format_worldbooks(context, only_constant=False, context_text=wb_context)
+    if wb_text:
+        prompt += "\n\n【世界书设定】\n" + wb_text
+    # 改写可能扩写或缩写，按原文长度预留余量
+    max_tokens = mcfg.get("max_tokens") or max(512, int(len(text) * 1.6 * 1.5))
+    return provider, model, mcfg, prompt, max_tokens
+
+
+def rewrite_chapter_stream(context, novel, chapter_index):
+    """改写模式：流式改写单章原文，yield 事件同 stream_chapter。"""
+    provider, model, mcfg, prompt, max_tokens = _rewrite_prompt(context, novel, chapter_index)
+    parts = []
+    for delta in chat_text_stream(
+            provider, model, _messages(context, prompt),
+            temperature=_temperature(context, mcfg),
+            max_tokens=max_tokens, name="改写章节"):
+        parts.append(delta)
+        yield {"type": "delta", "content": delta}
+    content = "".join(parts).strip()
+    yield {"type": "chapter_done", "content": content, "word_count": _count_chinese(content)}
+    yield {"type": "summary", "summary": _summarize_chapter(context, content, chapter_index)}
+
+
+def _continue_prompt(context, novel, chapter_index, instruction):
+    """构造续写单章的 prompt（以导入原文为前情）。"""
+    provider, model, mcfg = _resolve(context, "text")
+    words = int(novel.get("words_per_chapter", 2000))
+    max_tokens = mcfg.get("max_tokens")
+    if not max_tokens:
+        max_tokens = max(512, int(words * float(context["settings"].get("token_ratio", 1.6))))
+
+    chars = _format_characters(context, novel)
+    rels = _format_relationships(context, novel)
+    style = novel.get("style") or "文笔流畅自然，情节紧凑，人物鲜明。"
+    genre = novel.get("genre") or "不限"
+    worldbuilding = novel.get("worldbuilding") or "（暂无世界观设定）"
+    background = novel.get("background") or "（暂无背景设定）"
+
+    limit = _context_limit(context, mcfg, max_tokens) or 12000
+    # 原文保留「结尾」部分（续写需承接结尾），而非开头
+    source = novel.get("source_text") or ""
+    source = source[-int(limit * 0.5):]
+    # 已续写章节的正文作为「续写前情」，同样保留末尾
+    prev_parts = [f"【第{c['index']}章】\n{c['content']}"
+                  for c in novel.get("chapters", []) if c.get("content")]
+    prev = "\n\n".join(prev_parts) if prev_parts else "（尚无续写内容，请从原文结尾直接续写）"
+    prev = prev[-int(limit * 0.4):]
+
+    prompt = get_prompt(context, "continue_chapter").format(
+        title=novel.get("title") or "未命名",
+        n=chapter_index,
+        genre=genre,
+        instruction=instruction or "自然承接原文结尾，推进剧情。",
+        source=source or "（无导入原文）",
+        prev=prev,
+        style=style,
+        world=worldbuilding,
+        chars=chars,
+        rels=rels,
+        background=background,
+        words=words,
+    )
+    wb_context = f"{instruction} {source[-500:]} {prev[-500:]}"
+    wb_text = _format_worldbooks(context, only_constant=False, context_text=wb_context)
+    if wb_text:
+        prompt += "\n\n【世界书设定】\n" + wb_text
+    return provider, model, mcfg, prompt, max_tokens
+
+
+def continue_chapter_stream(context, novel, chapter_index, instruction=""):
+    """续写模式：流式生成下一章，yield 事件同 stream_chapter。"""
+    provider, model, mcfg, prompt, max_tokens = _continue_prompt(
+        context, novel, chapter_index, instruction)
+    parts = []
+    for delta in chat_text_stream(
+            provider, model, _messages(context, prompt),
+            temperature=_temperature(context, mcfg),
+            max_tokens=max_tokens, name="续写章节"):
+        parts.append(delta)
+        yield {"type": "delta", "content": delta}
+    content = "".join(parts).strip()
+    yield {"type": "chapter_done", "content": content, "word_count": _count_chinese(content)}
+    yield {"type": "summary", "summary": _summarize_chapter(context, content, chapter_index)}
+
+
 

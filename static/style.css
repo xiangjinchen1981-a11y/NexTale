@@ -69,11 +69,18 @@ body {
 .tab:hover { background: var(--accent-soft); color: var(--accent); }
 .tab.active { background: var(--accent); color: #fff; }
 .tab.tab-primary {
-  background: var(--accent);
+  background: linear-gradient(135deg, #f59e0b, #f97316);
   color: #fff;
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 15px;
+  padding: 8px 18px;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
 }
-.tab.tab-primary:hover { background: var(--accent); color: #fff; opacity: .88; }
+.tab.tab-primary:hover {
+  background: linear-gradient(135deg, #d97706, #ea580c);
+  color: #fff;
+  opacity: 1;
+}
 
 /* 配置页子 tab */
 .sub-tabs {

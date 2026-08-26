@@ -667,6 +667,9 @@ def get_trashed_novels():
 @app.post("/api/novels")
 def create_novel(body: dict):
     novels = storage.list_novels()
+    mode = body.get("mode", "outline")
+    source_text = body.get("source_text", "")
+    task_instruction = body.get("task_instruction", "")
     n = {
         "id": storage.new_id(),
         "title": body.get("title", "").strip() or "未命名",
@@ -685,10 +688,16 @@ def create_novel(body: dict):
         "progress_summary": "",
         "status": "draft",
         "text_model_id": body.get("text_model_id", "").strip(),
-        "mode": body.get("mode", "outline"),
+        "mode": mode,
+        "source_text": source_text,
+        "task_instruction": task_instruction,
         "dialog_messages": [],
         "created_at": time.time(),
     }
+    # 改写模式：导入原文后立即切分为章节（每章内容 = 原文片段）
+    if mode == "rewrite" and source_text.strip():
+        n["chapters"] = generators.split_source_chapters(
+            source_text, int(n["words_per_chapter"]))
     novels.append(n)
     storage.save_novels(novels)
     return {"novel": n}
@@ -731,7 +740,8 @@ def update_novel(nid: str, body: dict):
     _ensure_not_finished(storage.get_novel(nid) or {})
     editable = {"title", "genre", "style", "reference_text", "character_ids",
                 "relationships", "chapter_count", "words_per_chapter",
-                "text_model_id", "summary", "worldbuilding", "background", "mode"}
+                "text_model_id", "summary", "worldbuilding", "background", "mode",
+                "source_text", "task_instruction"}
     def mut(n):
         for k in editable:
             if k in body:
@@ -1529,6 +1539,183 @@ def revert_chapter(nid: str, index: int, body: dict):
                 ch["word_count"] = v["word_count"]
                 break
 
+    n = storage.update_novel(nid, mut)
+    if not n:
+        raise HTTPException(404, "小说不存在")
+    return {"novel": n}
+
+
+# ================= 改写 / 续写模式（导入已有小说） =================
+
+@app.post("/api/novels/{nid}/rewrite/stream")
+async def rewrite_stream(nid: str, body: dict):
+    """改写模式：按任务要求流式改写某章原文。body: {index}。"""
+    n = storage.get_novel(nid)
+    if not n:
+        raise HTTPException(404, "小说不存在")
+    _ensure_not_finished(n)
+    index = int((body or {}).get("index", 0))
+    if index < 1 or index > len(n.get("chapters", [])):
+        raise HTTPException(400, f"章节序号越界（1~{len(n.get('chapters', []))}）")
+    storage.snapshot_chapter(nid, index, source="ai")
+    ctx = _ctx(n)
+
+    def sse(event: dict) -> str:
+        return "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+
+    q: queue.Queue = queue.Queue(maxsize=1024)
+    loop = asyncio.get_running_loop()
+    stream_error: dict = {}
+
+    def _persist_done(content: str, word_count: int):
+        def mut(m):
+            for i, ch in enumerate(m["chapters"]):
+                if ch["index"] == index:
+                    m["chapters"][i] = {**ch, "content": content, "word_count": word_count}
+                    break
+        storage.update_novel(nid, mut)
+
+    def _persist_summary(summary: str):
+        if not summary:
+            return
+        def mut(m):
+            for i, ch in enumerate(m["chapters"]):
+                if ch["index"] == index:
+                    ch["summary"] = summary
+                    break
+        storage.update_novel(nid, mut)
+
+    def _producer():
+        try:
+            for event in generators.rewrite_chapter_stream(ctx, n, index):
+                if event["type"] == "chapter_done":
+                    _persist_done(event["content"], event["word_count"])
+                elif event["type"] == "summary":
+                    _persist_summary(event["summary"])
+                q.put(event)
+            q.put(None)
+        except Exception as e:  # noqa: BLE001
+            stream_error["err"] = e
+            q.put(None)
+
+    threading.Thread(target=_producer, daemon=True).start()
+
+    async def gen():
+        try:
+            while True:
+                item = await loop.run_in_executor(None, q.get)
+                if item is None:
+                    break
+                yield sse(item)
+                await asyncio.sleep(0)
+            n2 = storage.get_novel(nid)
+            yield sse({"type": "done", "novel": n2})
+            if "err" in stream_error:
+                yield sse({"type": "error", "message": str(_err(stream_error["err"]).detail)})
+        except Exception as e:  # noqa: BLE001
+            yield sse({"type": "error", "message": str(_err(e).detail)})
+
+    return StreamingResponse(
+        gen(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
+
+
+@app.post("/api/novels/{nid}/continue/stream")
+async def continue_stream(nid: str, body: dict):
+    """续写模式：以导入原文为前情流式生成下一章。body: {instruction}。"""
+    n = storage.get_novel(nid)
+    if not n:
+        raise HTTPException(404, "小说不存在")
+    _ensure_not_finished(n)
+    instruction = (body or {}).get("instruction", "").strip()
+    if not instruction:
+        raise HTTPException(400, "请填写本章续写要求")
+    index = len(n.get("chapters", [])) + 1
+    ctx = _ctx(n)
+
+    def sse(event: dict) -> str:
+        return "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+
+    q: queue.Queue = queue.Queue(maxsize=1024)
+    loop = asyncio.get_running_loop()
+    stream_error: dict = {}
+
+    def _persist_done(content: str, word_count: int):
+        chapter = {
+            "index": index,
+            "title": f"第{index}章",
+            "summary": "",
+            "content": content,
+            "word_count": word_count,
+            "instruction": instruction,
+        }
+        def mut(m):
+            m["chapters"].append(chapter)
+            m["status"] = "generating"
+        storage.update_novel(nid, mut)
+
+    def _persist_summary(summary: str):
+        if not summary:
+            return
+        def mut(m):
+            for ch in m["chapters"]:
+                if ch["index"] == index:
+                    ch["summary"] = summary
+                    break
+        storage.update_novel(nid, mut)
+
+    def _producer():
+        try:
+            for event in generators.continue_chapter_stream(ctx, n, index, instruction):
+                if event["type"] == "chapter_done":
+                    _persist_done(event["content"], event["word_count"])
+                elif event["type"] == "summary":
+                    _persist_summary(event["summary"])
+                q.put(event)
+            q.put(None)
+        except Exception as e:  # noqa: BLE001
+            stream_error["err"] = e
+            q.put(None)
+
+    threading.Thread(target=_producer, daemon=True).start()
+
+    async def gen():
+        try:
+            while True:
+                item = await loop.run_in_executor(None, q.get)
+                if item is None:
+                    break
+                yield sse(item)
+                await asyncio.sleep(0)
+            n2 = storage.get_novel(nid)
+            yield sse({"type": "done", "novel": n2})
+            if "err" in stream_error:
+                yield sse({"type": "error", "message": str(_err(stream_error["err"]).detail)})
+        except Exception as e:  # noqa: BLE001
+            yield sse({"type": "error", "message": str(_err(e).detail)})
+
+    return StreamingResponse(
+        gen(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
+
+
+@app.post("/api/novels/{nid}/resplit")
+def resplit_source(nid: str):
+    """改写模式：按 source_text 重新切分章节（丢弃已有改写结果）。"""
+    n = storage.get_novel(nid)
+    if not n:
+        raise HTTPException(404, "小说不存在")
+    _ensure_not_finished(n)
+    source_text = (n.get("source_text") or "").strip()
+    if not source_text:
+        raise HTTPException(400, "尚未导入原文")
+    chapters = generators.split_source_chapters(
+        source_text, int(n.get("words_per_chapter", 2000)))
+
+    def mut(m):
+        m["chapters"] = chapters
     n = storage.update_novel(nid, mut)
     if not n:
         raise HTTPException(404, "小说不存在")
