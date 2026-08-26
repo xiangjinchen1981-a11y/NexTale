@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>织叙-NexTale</title>
-  <link rel="stylesheet" href="style.css?v=20260826m">
+  <link rel="stylesheet" href="style.css?v=20260826o">
 </head>
 <body>
   <header class="topbar">
@@ -432,7 +432,7 @@
           <h4>导入已有小说原文</h4>
           <p class="hint">粘贴已有小说的全文，作为「改写」的素材或「续写」的前情。导入后系统会自动按章节（或每章字数）切分。</p>
           <label>原文内容
-            <textarea id="n-source" rows="10" placeholder="粘贴已有小说的全文…"></textarea>
+            <textarea id="n-source" rows="10" placeholder="粘贴已有小说的全文…（续写模式粘贴完成后会自动拆解原著）" onblur="maybeAutoAnalyze()"></textarea>
           </label>
           <div class="row" style="margin-top:6px">
             <button type="button" class="btn" onclick="pickSourceFile()">📄 从文件导入（.txt / .md）</button>
@@ -443,6 +443,7 @@
             <textarea id="n-task-instruction" rows="3" placeholder="改写示例：改写成第一人称、古文风、精简到原来的60%…；续写示例：让主角踏上复仇之路、开启全新篇章…"></textarea>
           </label>
         </div>
+        <div id="editor-profile-box"></div>
         <label>故事背景（时代/地点/大环境设定）
           <textarea id="n-background" rows="5" placeholder="如：架空的东方大陆，王朝末年，边关战乱频仍"></textarea>
         </label>
@@ -575,11 +576,13 @@
         <textarea id="continue-instruction" rows="3" placeholder="例如：主角在多年后重返故地，发现当年的真相另有隐情……"></textarea>
         <div class="row" style="margin-top:10px">
           <button class="btn primary" id="continue-gen-btn" onclick="generateContinueChapter()">续写下一章</button>
+          <button class="btn" id="continue-analyze-btn" onclick="analyzeSourceProfile()">🧠 AI 拆解原著</button>
           <span class="spacer"></span>
           <button class="btn" onclick="nav('#/novels/' + currentNovelId + '/read')" id="continue-read-btn" style="display:none">阅读全文</button>
         </div>
       </div>
       <div class="card source-card" id="continue-source-box"></div>
+      <div id="continue-profile-box"></div>
       <div id="continue-body"></div>
     </section>
 
@@ -644,6 +647,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260826l"></script>
+  <script src="app.js?v=20260826q"></script>
 </body>
 </html>

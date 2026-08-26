@@ -691,6 +691,7 @@ def create_novel(body: dict):
         "mode": mode,
         "source_text": source_text,
         "task_instruction": task_instruction,
+        "structured_profile": body.get("structured_profile", ""),
         "dialog_messages": [],
         "created_at": time.time(),
     }
@@ -741,7 +742,7 @@ def update_novel(nid: str, body: dict):
     editable = {"title", "genre", "style", "reference_text", "character_ids",
                 "relationships", "chapter_count", "words_per_chapter",
                 "text_model_id", "summary", "worldbuilding", "background", "mode",
-                "source_text", "task_instruction"}
+                "source_text", "task_instruction", "structured_profile"}
     def mut(n):
         for k in editable:
             if k in body:
@@ -1692,6 +1693,105 @@ async def continue_stream(nid: str, body: dict):
             yield sse({"type": "done", "novel": n2})
             if "err" in stream_error:
                 yield sse({"type": "error", "message": str(_err(stream_error["err"]).detail)})
+        except Exception as e:  # noqa: BLE001
+            yield sse({"type": "error", "message": str(_err(e).detail)})
+
+    return StreamingResponse(
+        gen(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
+
+
+@app.post("/api/novels/{nid}/analyze")
+async def analyze_source(nid: str):
+    """原著结构化拆解（SSE）：后台调用 LLM 提取故事档案，完成后持久化并返回。"""
+    n = storage.get_novel(nid)
+    if not n:
+        raise HTTPException(404, "小说不存在")
+    ctx = _ctx(n)
+
+    def sse(event: dict) -> str:
+        return "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+
+    q: queue.Queue = queue.Queue(maxsize=16)
+    loop = asyncio.get_running_loop()
+    stream_error: dict = {}
+
+    def _producer():
+        try:
+            profile = generators.analyze_source_profile(
+                ctx, n,
+                on_progress=lambda step, total, msg: q.put(
+                    {"type": "progress", "step": step, "total": total, "message": msg}))
+            def mut(m):
+                m["structured_profile"] = json.dumps(profile, ensure_ascii=False)
+            storage.update_novel(nid, mut)
+            q.put({"type": "profile", "profile": profile})
+        except Exception as e:  # noqa: BLE001
+            stream_error["err"] = e
+            q.put({"type": "error", "message": str(_err(e).detail)})
+        finally:
+            q.put(None)
+
+    threading.Thread(target=_producer, daemon=True).start()
+
+    async def gen():
+        try:
+            while True:
+                item = await loop.run_in_executor(None, q.get)
+                if item is None:
+                    break
+                yield sse(item)
+                await asyncio.sleep(0)
+            n2 = storage.get_novel(nid)
+            yield sse({"type": "done", "novel": n2})
+        except Exception as e:  # noqa: BLE001
+            yield sse({"type": "error", "message": str(_err(e).detail)})
+
+    return StreamingResponse(
+        gen(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
+
+
+@app.post("/api/analyze-source")
+async def analyze_source_text(body: dict):
+    """无状态原著结构化拆解（SSE）：接收原文文本，返回故事档案（不持久化）。"""
+    source_text = (body or {}).get("source_text", "").strip()
+    if not source_text:
+        raise HTTPException(400, "请先导入原文")
+    n = {"source_text": source_text,
+         "text_model_id": (body or {}).get("text_model_id", "")}
+    ctx = _ctx(n)
+
+    def sse(event: dict) -> str:
+        return "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
+
+    q: queue.Queue = queue.Queue(maxsize=16)
+    loop = asyncio.get_running_loop()
+
+    def _producer():
+        try:
+            profile = generators.analyze_source_profile(
+                ctx, n,
+                on_progress=lambda step, total, msg: q.put(
+                    {"type": "progress", "step": step, "total": total, "message": msg}))
+            q.put({"type": "profile", "profile": profile})
+        except Exception as e:  # noqa: BLE001
+            q.put({"type": "error", "message": str(_err(e).detail)})
+        finally:
+            q.put(None)
+
+    threading.Thread(target=_producer, daemon=True).start()
+
+    async def gen():
+        try:
+            while True:
+                item = await loop.run_in_executor(None, q.get)
+                if item is None:
+                    break
+                yield sse(item)
+                await asyncio.sleep(0)
         except Exception as e:  # noqa: BLE001
             yield sse({"type": "error", "message": str(_err(e).detail)})
 

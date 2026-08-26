@@ -1,4 +1,5 @@
 """小说生成引擎：风格分析、大纲生成、逐章创作、前情提要维护。"""
+import json
 import re
 
 from ai_client import chat_text, chat_text_stream, chat_vision, AIClientError
@@ -838,10 +839,7 @@ def _continue_prompt(context, novel, chapter_index, instruction):
 
     chars = _format_characters(context, novel)
     rels = _format_relationships(context, novel)
-    style = novel.get("style") or "文笔流畅自然，情节紧凑，人物鲜明。"
     genre = novel.get("genre") or "不限"
-    worldbuilding = novel.get("worldbuilding") or "（暂无世界观设定）"
-    background = novel.get("background") or "（暂无背景设定）"
 
     limit = _context_limit(context, mcfg, max_tokens) or 12000
     # 原文保留「结尾」部分（续写需承接结尾），而非开头
@@ -860,13 +858,14 @@ def _continue_prompt(context, novel, chapter_index, instruction):
         instruction=instruction or "自然承接原文结尾，推进剧情。",
         source=source or "（无导入原文）",
         prev=prev,
-        style=style,
-        world=worldbuilding,
         chars=chars,
         rels=rels,
-        background=background,
         words=words,
     )
+    # 已拆解的结构化故事档案优先注入，保证续写一致性（人物/世界观/主线/伏笔/摘要）
+    profile_text = _format_profile(_load_profile(novel))
+    if profile_text:
+        prompt += "\n\n【原著故事档案（拆解结果，续写必须严格遵守，不得违背/重定义/新增设定）】\n" + profile_text
     wb_context = f"{instruction} {source[-500:]} {prev[-500:]}"
     wb_text = _format_worldbooks(context, only_constant=False, context_text=wb_context)
     if wb_text:
@@ -888,6 +887,237 @@ def continue_chapter_stream(context, novel, chapter_index, instruction=""):
     content = "".join(parts).strip()
     yield {"type": "chapter_done", "content": content, "word_count": _count_chinese(content)}
     yield {"type": "summary", "summary": _summarize_chapter(context, content, chapter_index)}
+
+
+# ---------- 原著结构化拆解（续写模式） ----------
+
+def _extract_json(text):
+    """从模型输出中提取 JSON 对象（剥掉 ```json 代码围栏等）。"""
+    text = (text or "").strip()
+    if not text:
+        raise AIClientError("模型未返回内容")
+    m = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.S)
+    if m:
+        text = m.group(1).strip()
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise AIClientError("模型未返回有效的 JSON 结构")
+    try:
+        return json.loads(text[start:end + 1])
+    except ValueError as e:
+        raise AIClientError(f"拆解结果 JSON 解析失败：{e}") from e
+
+
+def _load_profile(novel):
+    """读取小说已保存的结构化档案（JSON 字符串 → dict），无则返回 None。"""
+    raw = (novel or {}).get("structured_profile") or ""
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+
+
+def _format_profile(profile):
+    """把结构化故事档案格式化为续写 prompt 的上下文块（空档案返回空串）。"""
+    if not isinstance(profile, dict):
+        return ""
+    parts = []
+
+    chars = profile.get("characters") or []
+    if chars:
+        lines = ["【人物档案】"]
+        for c in chars:
+            if not isinstance(c, dict):
+                continue
+            fields = [
+                f"性格：{c.get('core_personality', '')}",
+                f"说话：{c.get('speaking_style', '')}",
+                f"经历：{c.get('key_history', '')}",
+                f"关系：{c.get('relationship', '')}",
+                f"现状：{c.get('current_state', '')}",
+                f"禁忌：{c.get('taboo', '')}",
+            ]
+            lines.append(f"· {c.get('name', '?')}｜" + "；".join(
+                f for f in fields if f.split('：', 1)[-1].strip()))
+        parts.append("\n".join(lines))
+
+    ws = profile.get("world_setting") or {}
+    if isinstance(ws, dict):
+        ws_lines = []
+        for k, label in [("world_rules", "世界规则"), ("geography", "重要地域"),
+                         ("forces", "各大势力"), ("noun_glossary", "专有名词")]:
+            if ws.get(k):
+                ws_lines.append(f"{label}：{ws[k]}")
+        if ws_lines:
+            parts.append("【世界观设定】\n" + "\n".join(ws_lines))
+
+    mf = profile.get("main_frame") or {}
+    if isinstance(mf, dict):
+        fg = mf.get("foreshadowing_list") or []
+        if isinstance(fg, list):
+            fg_txt = "；".join(str(x) for x in fg)
+        else:
+            fg_txt = str(fg)
+        mf_lines = [
+            f"核心主题：{mf.get('core_theme', '')}",
+            f"主角长期目标：{mf.get('protagonist_goal', '')}",
+            f"核心矛盾：{mf.get('main_conflict', '')}",
+            f"文风基调：{mf.get('story_tone', '')}",
+            f"待回收伏笔：{fg_txt}",
+        ]
+        parts.append("【主线框架】\n" + "\n".join(mf_lines))
+
+    sm = profile.get("summary") or {}
+    if isinstance(sm, dict) and sm.get("full_outline"):
+        parts.append("【全书脉络摘要】\n" + str(sm["full_outline"]))
+
+    return "\n\n".join(parts)
+
+
+def _split_source_blocks(source, block_chars):
+    """把原文切成若干块，尽量在段落边界切分（超长段落则硬切）。"""
+    source = source.strip()
+    if len(source) <= block_chars:
+        return [source]
+    blocks = []
+    cur = ""
+    for para in re.split(r"\n\s*\n", source):
+        while len(para) > block_chars:
+            if cur:
+                blocks.append(cur)
+                cur = ""
+            blocks.append(para[:block_chars])
+            para = para[block_chars:]
+        if cur and len(cur) + len(para) + 2 > block_chars:
+            blocks.append(cur)
+            cur = para
+        else:
+            cur = (cur + "\n\n" + para) if cur else para
+    if cur:
+        blocks.append(cur)
+    return [b for b in blocks if b.strip()]
+
+
+def _merge_profiles(partials):
+    """把多个分块拆解的局部档案合并为一份全局档案。"""
+    merged = {
+        "characters": [],
+        "world_setting": {},
+        "main_frame": {"foreshadowing_list": []},
+        "summary": {"full_outline": "", "chapter_summaries": []},
+    }
+    char_by_name = {}
+    ws = {}
+    mf = {}
+    fg = []
+    fg_seen = set()
+    outlines = []
+    ch_sums = []
+    ch_seen = set()
+
+    for p in partials:
+        if not isinstance(p, dict):
+            continue
+        # 人物：按 name 合并，同名字段拼接
+        for c in (p.get("characters") or []):
+            if not isinstance(c, dict) or not (c.get("name") or "").strip():
+                continue
+            name = c["name"].strip()
+            if name not in char_by_name:
+                char_by_name[name] = {
+                    "name": name, "core_personality": "", "speaking_style": "",
+                    "key_history": "", "relationship": "", "current_state": "", "taboo": "",
+                }
+            dst = char_by_name[name]
+            for k in ["core_personality", "speaking_style", "key_history",
+                      "relationship", "current_state", "taboo"]:
+                v = (c.get(k) or "").strip()
+                if v and v not in dst[k]:
+                    dst[k] = (dst[k] + "；" + v) if dst[k] else v
+        # 世界观：各字段拼接（去重）
+        w = p.get("world_setting") or {}
+        for k in ["world_rules", "geography", "forces", "noun_glossary"]:
+            v = (w.get(k) or "").strip()
+            if v and v not in ws.get(k, ""):
+                ws[k] = (ws[k] + "；" + v) if ws.get(k) else v
+        # 主线框架：核心字段取第一个非空（全书级），伏笔拼接去重
+        m = p.get("main_frame") or {}
+        for k in ["core_theme", "protagonist_goal", "main_conflict", "story_tone"]:
+            v = (m.get(k) or "").strip()
+            if v and not mf.get(k):
+                mf[k] = v
+        fl = m.get("foreshadowing_list") or []
+        if isinstance(fl, list):
+            for x in fl:
+                s = str(x).strip()
+                if s and s not in fg_seen:
+                    fg_seen.add(s)
+                    fg.append(s)
+        # 摘要：outline 拼接，章节摘要去重
+        s = p.get("summary") or {}
+        if isinstance(s, dict):
+            if s.get("full_outline"):
+                outlines.append(s["full_outline"].strip())
+            for cs in (s.get("chapter_summaries") or []):
+                if not isinstance(cs, dict):
+                    continue
+                key = (cs.get("chapter") or "").strip()
+                brief = (cs.get("brief") or "").strip()
+                if brief and key not in ch_seen:
+                    ch_seen.add(key)
+                    ch_sums.append({"chapter": key, "brief": brief})
+
+    merged["characters"] = list(char_by_name.values())
+    merged["world_setting"] = ws
+    if mf:
+        mf["foreshadowing_list"] = fg
+        merged["main_frame"] = mf
+    merged["summary"]["full_outline"] = "\n".join(outlines)
+    merged["summary"]["chapter_summaries"] = ch_sums
+    return merged
+
+
+def analyze_source_profile(context, novel, on_progress=None):
+    """对原著全文做结构化拆解；超长时分块拆解再合并。
+
+    on_progress(step, total, message) 用于进度反馈（可选）。
+    返回 dict（characters/world_setting/main_frame/summary）。
+    """
+    provider, model, mcfg = _resolve(context, "text")
+    source = (novel.get("source_text") or "").strip()
+    if not source:
+        raise AIClientError("尚未导入原文，无法拆解")
+    # 拆解输出 JSON 较大，预留输出余量
+    max_tokens = max(int(mcfg.get("max_tokens") or 8192), 8192)
+    limit = _context_limit(context, mcfg, max_tokens)
+    # 每块原文上限（字符）：留出提示词 + 输出 token 的余量；未配置上下文时用保守默认
+    block_chars = max(limit - 3000, 6000) if limit else 50000
+
+    if len(source) <= block_chars:
+        prompt = get_prompt(context, "analyze_source").format(source=source)
+        content, _ = chat_text(
+            provider, model, _messages(context, prompt),
+            temperature=0.3, max_tokens=max_tokens, name="原著结构化拆解")
+        return _extract_json(content)
+
+    # 超长：分块拆解 + 合并
+    blocks = _split_source_blocks(source, block_chars)
+    partials = []
+    total = len(blocks)
+    for i, blk in enumerate(blocks, 1):
+        if on_progress:
+            on_progress(i, total, f"正在拆解第 {i}/{total} 块（约 {_count_chinese(blk)} 字）…")
+        prompt = get_prompt(context, "analyze_source_partial").format(block=blk)
+        content, _ = chat_text(
+            provider, model, _messages(context, prompt),
+            temperature=0.3, max_tokens=max_tokens, name=f"原著分块拆解 {i}/{total}")
+        partials.append(_extract_json(content))
+    if on_progress:
+        on_progress(total, total, "正在合并各块档案…")
+    return _merge_profiles(partials)
 
 
 

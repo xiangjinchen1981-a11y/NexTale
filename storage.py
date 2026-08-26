@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS novels (
   worldbuilding_source TEXT NOT NULL DEFAULT 'manual',
   source_text TEXT NOT NULL DEFAULT '',
   task_instruction TEXT NOT NULL DEFAULT '',
+  structured_profile TEXT NOT NULL DEFAULT '',
   created_at REAL NOT NULL DEFAULT 0,
   deleted_at REAL NOT NULL DEFAULT 0
 );
@@ -160,6 +161,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE novels ADD COLUMN source_text TEXT NOT NULL DEFAULT ''")
     if "task_instruction" not in cols:
         conn.execute("ALTER TABLE novels ADD COLUMN task_instruction TEXT NOT NULL DEFAULT ''")
+    if "structured_profile" not in cols:
+        conn.execute("ALTER TABLE novels ADD COLUMN structured_profile TEXT NOT NULL DEFAULT ''")
 
     mcols = {r[1] for r in conn.execute("PRAGMA table_info(models)")}
     if "context_length" not in mcols:
@@ -379,8 +382,8 @@ def save_novels(novels):
                 "INSERT OR REPLACE INTO novels (id, title, genre, style, reference_text, character_ids, "
                 "relationships, chapter_count, words_per_chapter, summary, worldbuilding, background, "
                 "progress_summary, status, text_model_id, mode, dialog_messages, worldbuilding_source, "
-                "source_text, task_instruction, created_at, deleted_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "source_text, task_instruction, structured_profile, created_at, deleted_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (nid, n.get("title", ""), n.get("genre", ""), n.get("style", ""),
                  n.get("reference_text", ""), json.dumps(n.get("character_ids", [])),
                  json.dumps(n.get("relationships", [])), n.get("chapter_count", 10),
@@ -390,6 +393,7 @@ def save_novels(novels):
                  n.get("mode", "outline"), json.dumps(n.get("dialog_messages", [])),
                  n.get("worldbuilding_source", "manual"),
                  n.get("source_text", ""), n.get("task_instruction", ""),
+                 n.get("structured_profile", ""),
                  n.get("created_at", 0), n.get("deleted_at", 0)),
             )
             # 重建本章节（先删后插，保证与传入数据一致）
