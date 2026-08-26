@@ -68,6 +68,12 @@ body {
 }
 .tab:hover { background: var(--accent-soft); color: var(--accent); }
 .tab.active { background: var(--accent); color: #fff; }
+.tab.tab-primary {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.tab.tab-primary:hover { background: var(--accent); color: #fff; opacity: .88; }
 
 /* 配置页子 tab */
 .sub-tabs {
@@ -113,6 +119,17 @@ body {
 
 .novel-card .meta { margin-top: 4px; }
 
+.library-summary {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--subtle-bg, var(--accent-soft));
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
 h2 { margin: 0 0 6px; }
 h3 { margin: 24px 0 10px; }
 h4 { margin: 8px 0; }
@@ -133,11 +150,11 @@ h4 { margin: 8px 0; }
 
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
   gap: 12px;
   margin-bottom: 12px;
 }
-label { display: flex; flex-direction: column; font-size: 13px; color: var(--muted); gap: 4px; }
+label { display: flex; flex-direction: column; font-size: 13px; color: var(--muted); gap: 4px; padding-bottom:15px}
 input, select, textarea {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -212,6 +229,44 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   background: var(--accent-soft);
 }
 
+/* 角色卡片（封面式） */
+.char-card { padding: 0; overflow: hidden; }
+.char-card-cover {
+  position: relative;
+  height: 170px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+}
+.char-card-cover img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.char-cover-ph {
+  width: 100%; height: 100%;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 8px;
+  color: var(--muted);
+  background: linear-gradient(135deg, var(--accent-soft), transparent 70%);
+  font-size: 13px;
+}
+.char-cover-ph svg { width: 46px; height: 46px; opacity: .55; }
+.char-cover-btn {
+  position: absolute;
+  right: 10px; bottom: 10px;
+  font-size: 12px;
+  padding: 4px 10px;
+  opacity: .92;
+  background: rgba(255,255,255,.9);
+  border: 1px solid var(--border);
+}
+.dark .char-cover-btn { background: rgba(30,32,40,.85); }
+.char-card-body { padding: 14px 16px 16px; }
+.char-name { font-weight: 600; font-size: 15px; flex: 1; min-width: 0; }
+.char-card .char-detail { margin-top: 12px; }
+
 .char-detail { margin-top: 10px; font-size: 14px; }
 .char-detail .kv { margin: 12px 0; display: flex; flex-direction: column; gap: 6px; }
 .char-detail .k { color: var(--muted); font-size: 12px; }
@@ -221,6 +276,58 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   resize: vertical;
   font-size: 14px;
   line-height: 1.7;
+}
+
+/* ============ 角色库：照片卡片网格 ============ */
+.char-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 16px;
+}
+.char-grid-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.char-grid-card:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,.08); }
+.char-grid-cover {
+  position: relative;
+  height: 200px;
+  background: var(--accent-soft);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  cursor: pointer;
+}
+.char-grid-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.char-grid-body { padding: 10px 12px 12px; }
+.char-grid-body .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.char-grid-name { font-weight: 600; font-size: 15px; cursor: pointer; }
+.char-grid-name:hover { color: var(--accent); }
+.char-grid-body .meta { margin-top: 4px; font-size: 12px; color: var(--muted); word-break: break-all; }
+
+/* ============ 角色详情页 ============ */
+.char-detail-layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+.char-detail-photo-wrap { display: flex; flex-direction: column; gap: 10px; }
+.char-detail-photo {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--accent-soft);
+}
+.char-detail-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.char-detail-form { display: flex; flex-direction: column; gap: 4px; }
+@media (max-width: 760px) {
+  .char-detail-layout { grid-template-columns: 1fr; }
+  .char-detail-photo { max-width: 260px; }
 }
 
 /* 题材库添加表单：上下文本框保持足够间距 */
@@ -1038,4 +1145,91 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* ============ 照片裁剪器 ============ */
+.crop-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 300;
+}
+.crop-overlay.show { display: flex; }
+.crop-modal {
+  background: var(--card);
+  border-radius: 14px;
+  width: min(640px, 94vw);
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+.crop-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 14px;
+}
+.crop-stage {
+  position: relative;
+  height: 440px;
+  background: #000;
+  overflow: hidden;
+  touch-action: none;
+}
+.crop-stage img {
+  position: absolute;
+  max-width: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.crop-box {
+  position: absolute;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+  cursor: move;
+  touch-action: none;
+}
+.crop-handle {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  background: #fff;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+}
+.crop-handle.nw { left: -9px; top: -9px; cursor: nwse-resize; }
+.crop-handle.ne { right: -9px; top: -9px; cursor: nesw-resize; }
+.crop-handle.sw { left: -9px; bottom: -9px; cursor: nesw-resize; }
+.crop-handle.se { right: -9px; bottom: -9px; cursor: nwse-resize; }
+.crop-modal-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* ============ 添加角色页照片选择与预览 ============ */
+.photo-picker-row { display: flex; gap: 8px; margin-top: 6px; }
+.photo-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--subtle-bg);
+}
+.photo-preview img {
+  width: 72px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--border);
 }

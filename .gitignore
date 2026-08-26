@@ -11,3 +11,4 @@ output/*
 !uploads/.gitkeep
 !output/.gitkeep
 .DS_Store
+run.sh

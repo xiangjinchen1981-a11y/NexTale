@@ -195,7 +195,7 @@ function maskKey(k) {
 
 // ============ 视图 / 路由 ============
 // 视图列表：login（登录）、providers（配置）、genres（题材库）、worldbooks（世界书）、novels（列表）、trash（垃圾箱）、editor（创作）、generate（生成）、chapter（章节详情）、reader（阅读）、improv（即兴写作）、dialog（对话模式）、logs（请求日志）
-const VIEWS = ['login', 'providers', 'genres', 'worldbooks', 'novels', 'trash', 'editor', 'generate', 'chapter', 'reader', 'improv', 'dialog', 'logs'];
+const VIEWS = ['login', 'providers', 'genres', 'worldbooks', 'characters', 'character-new', 'character-detail', 'novels', 'library', 'trash', 'editor', 'generate', 'chapter', 'reader', 'improv', 'dialog', 'logs'];
 
 // 当前小说 id（用于创作/生成页定位）
 let currentNovelId = null;
@@ -217,10 +217,12 @@ function showView(name) {
   document.querySelectorAll('.tab').forEach(b => {
     const tab = b.dataset.tab;
     let active = false;
-    if (name === 'genres' && tab === 'genres') active = true;
-    else if (name === 'worldbooks' && tab === 'worldbooks') active = true;
-    else if (name === 'logs' && tab === 'logs') active = true;
-    else if (name !== 'genres' && name !== 'worldbooks' && name !== 'logs' && name !== 'login' && name !== 'providers' && tab === 'novels') active = true;
+    if (tab === 'genres') active = (name === 'genres');
+    else if (tab === 'worldbooks') active = (name === 'worldbooks');
+    else if (tab === 'characters') active = (name === 'characters' || name === 'character-new' || name === 'character-detail');
+    else if (tab === 'library') active = (name === 'library');
+    else if (tab === 'logs') active = (name === 'logs');
+    else if (tab === 'novels') active = (name !== 'genres' && name !== 'worldbooks' && name !== 'characters' && name !== 'character-new' && name !== 'character-detail' && name !== 'library' && name !== 'logs' && name !== 'login' && name !== 'providers');
     b.classList.toggle('active', active);
   });
   // 视图切换时触发对应数据加载
@@ -267,8 +269,35 @@ async function router() {
     return;
   }
 
+  if (section === 'characters') {
+    if (parts.length === 1) {
+      // 角色库列表页
+      resumeWizardStep = null;
+      showView('characters');
+      await loadCharacters();
+      renderCharacterGrid();
+      return;
+    }
+    if (parts[1] === 'new') {
+      // 添加角色页
+      showView('character-new');
+      resetCharacterNewForm();
+      return;
+    }
+    // /characters/:id 角色详情页
+    showView('character-detail');
+    await openCharacterDetail(parts[1]);
+    return;
+  }
+
   if (section === 'logs') {
     showView('logs');
+    return;
+  }
+
+  if (section === 'library') {
+    showView('library');
+    await loadLibrary();
     return;
   }
 
@@ -356,6 +385,10 @@ document.querySelectorAll('.tab').forEach(btn => {
       nav('#/genres');
     } else if (tab === 'worldbooks') {
       nav('#/worldbooks');
+    } else if (tab === 'characters') {
+      nav('#/characters');
+    } else if (tab === 'library') {
+      nav('#/library');
     } else if (tab === 'logs') {
       nav('#/logs');
     } else {
@@ -802,11 +835,16 @@ async function saveSettings() {
   } catch (e) { toast(e.message, 'err'); }
 }
 
-// ================= 角色设定（小说创作步骤 2） =================
+// ================= 角色库（全局角色管理） =================
+let charDetailId = null;         // 详情页正在编辑的角色 id
+let charBackHash = '#/characters'; // 详情/添加页「返回」目标
+let charAssignNovelId = null;    // 从小说向导进入添加页时，新角色自动归入的小说 id
+let resumeWizardStep = null;     // 从角色页返回小说编辑页时恢复的向导步骤
+let newCharPhotoBlob = null;     // 添加页已裁剪、待上传的照片
+
 async function loadCharacters() {
   const d = await api('/api/characters');
   state.characters = d.characters;
-  if (state.wizardStep === 3) renderCharacters();
 }
 
 function currentNovelCharacters() {
@@ -814,156 +852,478 @@ function currentNovelCharacters() {
   return state.characters.filter(c => ids.includes(c.id));
 }
 
+// 角色封面（照片或占位图）
+function charCoverHTML(c) {
+  if (c.photo_path) {
+    return `<img src="/${esc(c.photo_path)}" alt="${esc(c.name || '')}" loading="lazy">`;
+  }
+  return `<div class="char-cover-ph">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+    <span>未上传照片</span>
+  </div>`;
+}
+
+// 角色库列表页：照片卡片网格
+function renderCharacterGrid() {
+  const box = $('character-grid');
+  if (!box) return;
+  const chars = state.characters;
+  if (!chars.length) {
+    box.innerHTML = '<div class="card meta" style="grid-column:1/-1">暂无角色，点击右上角「添加角色」创建你的第一个角色。</div>';
+    return;
+  }
+  box.innerHTML = chars.map(c => `
+    <div class="char-grid-card">
+      <div class="char-grid-cover" onclick="openCharFromList('${c.id}')" title="点击查看/编辑角色">
+        ${charCoverHTML(c)}
+      </div>
+      <div class="char-grid-body">
+        <div class="char-grid-name" onclick="openCharFromList('${c.id}')">${esc(c.name || '未命名')}</div>
+        <div class="meta">${esc((c.appearance || '').slice(0, 40)) || '暂无外貌描述'}</div>
+      </div>
+    </div>`).join('');
+}
+
+// 小说向导（步骤3）：当前小说角色的照片卡片网格
 function renderCharacters() {
   const box = $('character-list');
+  if (!box) return;
   const chars = currentNovelCharacters();
   box.innerHTML = chars.length
     ? chars.map(c => `
-      <div class="card" id="char-${c.id}">
-        <div class="row">
-          ${c.photo_path ? `<img class="avatar" src="/${esc(c.photo_path)}" alt="">` : '<div class="avatar"></div>'}
-          <input style="font-weight:600" id="char-name-${c.id}" value="${esc(c.name)}" placeholder="角色姓名" oninput="markCharDirty('${c.id}')">
-          <span class="spacer"></span>
-          <button class="btn" onclick="uploadCharPhoto('${c.id}')">上传/更换照片并分析</button>
-          <button class="btn danger" onclick="deleteCharacter('${c.id}')">移除</button>
+      <div class="char-grid-card">
+        <div class="char-grid-cover" onclick="openCharFromWizard('${c.id}')" title="点击查看/编辑角色">
+          ${charCoverHTML(c)}
         </div>
-        <div class="char-detail">
-          <div class="kv"><span class="k">外貌</span><textarea id="char-appearance-${c.id}" rows="3" oninput="markCharDirty('${c.id}')">${esc(c.appearance)}</textarea></div>
-          <div class="kv"><span class="k">性格</span><textarea id="char-personality-${c.id}" rows="3" oninput="markCharDirty('${c.id}')">${esc(c.personality)}</textarea></div>
-          <div class="kv"><span class="k">背景</span><textarea id="char-background-${c.id}" rows="3" oninput="markCharDirty('${c.id}')">${esc(c.background)}</textarea></div>
-          <div class="kv"><span class="k">补充</span><textarea id="char-notes-${c.id}" rows="2" oninput="markCharDirty('${c.id}')">${esc(c.notes)}</textarea></div>
-        </div>
-        <div class="row" style="margin-top:12px">
-          <span class="meta" id="char-dirty-${c.id}"></span>
-          <span class="spacer"></span>
-          <button class="btn primary" onclick="saveCharacter('${c.id}')">保存</button>
+        <div class="char-grid-body">
+          <div class="row">
+            <span class="char-grid-name" onclick="openCharFromWizard('${c.id}')">${esc(c.name || '未命名')}</span>
+            <span class="spacer"></span>
+            <button class="btn danger" onclick="removeCharacterFromNovel('${c.id}')">移除</button>
+          </div>
         </div>
       </div>`).join('')
-    : '<div class="card meta">本小说还没有角色，上传照片或手动添加。</div>';
+    : '<div class="card meta" style="grid-column:1/-1">本小说还没有角色，点击「添加角色」新增。</div>';
 }
 
-async function addCharacter() {
-  const name = $('c-name').value.trim();
-  const appearance = $('c-appearance').value.trim();
-  const personality = $('c-personality').value.trim();
-  const background = $('c-background').value.trim();
-  const notes = $('c-notes').value.trim();
-  const photoInput = $('c-photo');
-  if (!name) return toast('请填写角色姓名', 'err');
+// —— 角色库列表页入口：点卡片进详情 ——
+function openCharFromList(id) {
+  charBackHash = '#/characters';
+  resumeWizardStep = null;
+  nav('#/characters/' + id);
+}
+
+// —— 小说向导入口：点卡片进详情，返回时回到向导步骤3 ——
+async function openCharFromWizard(id) {
+  charBackHash = state.novel ? ('#/novels/' + state.novel.id + '/edit') : '#/characters';
+  resumeWizardStep = 3;
+  await persistNovelCharsSilently();
+  nav('#/characters/' + id);
+}
+
+// 返回（详情/添加页共用）
+function goBackFromCharacter() {
+  nav(charBackHash || '#/characters');
+}
+
+// 添加角色（角色库入口）
+function goAddCharacterFromList() {
+  charBackHash = '#/characters';
+  charAssignNovelId = null;
+  resumeWizardStep = null;
+  nav('#/characters/new');
+}
+
+// 添加角色（小说向导入口：新角色自动归入本小说）
+async function goAddCharacterFromWizard() {
   if (!state.novel) return toast('请先完成基本信息', 'err');
+  charBackHash = '#/novels/' + state.novel.id + '/edit';
+  charAssignNovelId = state.novel.id;
+  resumeWizardStep = 3;
+  await persistNovelCharsSilently();
+  nav('#/characters/new');
+}
+
+// 静默保存小说当前角色与关系（避免离开向导时丢失手动输入）
+async function persistNovelCharsSilently() {
+  if (!state.novel) return;
+  try {
+    await api('/api/novels/' + state.novel.id, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        character_ids: state.novel.character_ids || [],
+        relationships: state.relations.filter(r => r.char1_id && r.char2_id && r.char1_id !== r.char2_id),
+      }),
+    });
+  } catch (e) { /* 忽略：如已完结小说等，不阻断跳转 */ }
+}
+
+// 添加页：重置表单
+function resetCharacterNewForm() {
+  $('c-new-name').value = '';
+  $('c-new-appearance').value = '';
+  $('c-new-personality').value = '';
+  $('c-new-background').value = '';
+  $('c-new-notes').value = '';
+  newCharPhotoBlob = null;
+  renderNewPhotoPreview();
+  const title = $('character-new-title');
+  if (title) title.textContent = charAssignNovelId ? '添加角色（将归入当前小说）' : '添加角色';
+}
+
+// 保存新角色
+async function saveNewCharacter() {
+  const name = $('c-new-name').value.trim();
+  if (!name) return toast('请填写角色姓名', 'err');
   try {
     const d = await api('/api/characters', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, appearance, personality, background, notes }),
+      body: JSON.stringify({
+        name,
+        appearance: $('c-new-appearance').value.trim(),
+        personality: $('c-new-personality').value.trim(),
+        background: $('c-new-background').value.trim(),
+        notes: $('c-new-notes').value.trim(),
+      }),
     });
     const cid = d.character.id;
-    // 自动归入当前小说
-    const ids = state.novel.character_ids || [];
-    if (!ids.includes(cid)) ids.push(cid);
+    if (newCharPhotoBlob) {
+      showLoading('正在上传照片…', '');
+      try { await uploadPhoto(cid, newCharPhotoBlob); newCharPhotoBlob = null; }
+      finally { hideLoading(); }
+    }
+    // 自动归入小说（若从向导进入）
+    if (charAssignNovelId) {
+      try {
+        const nd = await api('/api/novels/' + charAssignNovelId);
+        const ids = nd.novel.character_ids || [];
+        if (!ids.includes(cid)) ids.push(cid);
+        const upd = await api('/api/novels/' + charAssignNovelId, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ character_ids: ids }),
+        });
+        if (state.novel && state.novel.id === charAssignNovelId) state.novel = upd.novel;
+      } catch (e) { /* 忽略 */ }
+      charAssignNovelId = null;
+    }
+    await loadCharacters();
+    toast('角色已添加', 'ok');
+    // 进入详情页继续完善
+    nav('#/characters/' + cid);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// 详情页：加载角色
+async function openCharacterDetail(id) {
+  if (!state.characters.length) { await loadCharacters(); }
+  const c = state.characters.find(x => x.id === id);
+  if (!c) { toast('角色不存在', 'err'); nav('#/characters'); return; }
+  charDetailId = id;
+  const title = $('character-detail-title');
+  if (title) title.textContent = '角色详情 · ' + (c.name || '未命名');
+  const photo = $('c-detail-photo');
+  photo.innerHTML = c.photo_path
+    ? `<img src="/${esc(c.photo_path)}" alt="${esc(c.name || '')}">`
+    : `<div class="char-cover-ph">
+         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+         <span>未上传照片</span>
+       </div>`;
+  $('c-detail-name').value = c.name || '';
+  $('c-detail-appearance').value = c.appearance || '';
+  $('c-detail-personality').value = c.personality || '';
+  $('c-detail-background').value = c.background || '';
+  $('c-detail-notes').value = c.notes || '';
+  if (!charBackHash) charBackHash = '#/characters';
+}
+
+// 详情页：保存
+async function saveCharacterDetail() {
+  const id = charDetailId;
+  if (!id) return;
+  const name = $('c-detail-name').value.trim();
+  if (!name) return toast('角色姓名不能为空', 'err');
+  try {
+    await api('/api/characters/' + id, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name,
+        appearance: $('c-detail-appearance').value.trim(),
+        personality: $('c-detail-personality').value.trim(),
+        background: $('c-detail-background').value.trim(),
+        notes: $('c-detail-notes').value.trim(),
+      }),
+    });
+    await loadCharacters();
+    const title = $('character-detail-title');
+    if (title) title.textContent = '角色详情 · ' + name;
+    toast('角色已保存', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// 详情页：更换照片（先裁剪，再上传，不自动分析）
+function uploadDetailPhoto() {
+  const id = charDetailId;
+  if (!id) return;
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = 'image/*';
+  input.onchange = () => {
+    if (!input.files.length) return;
+    cropFromFile(input.files[0], async (blob) => {
+      showLoading('正在上传照片…', '');
+      try {
+        await uploadPhoto(id, blob);
+        toast('照片已更新', 'ok');
+        await loadCharacters();
+        openCharacterDetail(id);
+      } catch (e) { toast(e.message, 'err'); }
+      finally { hideLoading(); }
+    });
+  };
+  input.click();
+}
+
+// 详情页：手动触发 AI 分析当前照片（外貌/穿着/性格），填充表单供确认
+async function analyzeDetailPhoto() {
+  const id = charDetailId;
+  if (!id) return;
+  const c = state.characters.find(x => x.id === id);
+  if (!c || !c.photo_path) return toast('请先上传照片', 'err');
+  const appEl = $('c-detail-appearance'), perEl = $('c-detail-personality');
+  if ((appEl.value.trim() || perEl.value.trim()) && !confirm('外貌/性格已有内容，确定用 AI 分析结果覆盖吗？')) return;
+  showLoading('正在分析人物照片…', 'AI 正在识别外貌、穿着与性格特征，请稍候');
+  try {
+    const blob = await fetch('/' + c.photo_path).then(r => {
+      if (!r.ok) throw new Error('照片读取失败');
+      return r.blob();
+    });
+    const r = await analyzePhotoBlob(blob);
+    appEl.value = r.appearance || '';
+    perEl.value = r.personality || '';
+    toast('分析完成，请确认后点击「保存」', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+  finally { hideLoading(); }
+}
+
+// 详情页：删除角色
+async function deleteCharacterDetail() {
+  const id = charDetailId;
+  if (!id) return;
+  if (!confirm('确定删除该角色？此操作不可恢复。')) return;
+  try {
+    await api('/api/characters/' + id, { method: 'DELETE' });
+    await loadCharacters();
+    toast('角色已删除', 'ok');
+    goBackFromCharacter();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// 小说向导：仅从本小说移除角色（不删除角色本身）
+async function removeCharacterFromNovel(id) {
+  if (!state.novel) return;
+  if (!confirm('确定将该角色从本小说移除？（角色本身不会被删除）')) return;
+  try {
+    const ids = (state.novel.character_ids || []).filter(x => x !== id);
     const nd = await api('/api/novels/' + state.novel.id, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ character_ids: ids }),
     });
     state.novel = nd.novel;
-    ['c-name', 'c-appearance', 'c-personality', 'c-background', 'c-notes'].forEach(i => $(i).value = '');
-    if (photoInput.files.length) {
-      showLoading('正在分析人物照片…', 'AI 正在识别外貌与性格特征，请稍候');
-      try {
-        const r = await uploadPhoto(cid, photoInput.files[0]);
-        photoInput.value = '';
-        if (r.analyzed === true) {
-          toast('角色已添加，AI 分析完成', 'ok');
-        } else if (r.analyzed === false) {
-          toast('角色已添加（照片分析失败：' + (r.analyze_error || '未配置视觉模型') + '）', 'err');
-        } else {
-          toast('角色已添加（未配置视觉模型，仅保存照片）', 'ok');
-        }
-      } finally {
-        hideLoading();
-      }
-    } else {
-      toast('角色已添加', 'ok');
-    }
-    loadCharacters();
+    await loadCharacters();
+    renderCharacters();
+    renderRelations();
     loadNovels();
+    toast('已从本小说移除', 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
-async function uploadCharPhoto(id) {
-  const input = document.createElement('input');
-  input.type = 'file'; input.accept = 'image/*';
-  input.onchange = async () => {
-    if (!input.files.length) return;
-    showLoading('正在分析人物照片…', 'AI 正在识别外貌与性格特征，请稍候');
-    try {
-      const r = await uploadPhoto(id, input.files[0]);
-      if (r.analyzed === false) {
-        toast('照片已上传，但分析失败：' + (r.analyze_error || '未配置视觉模型'), 'err');
-      } else if (r.analyzed) {
-        toast('外貌性格分析完成', 'ok');
-      } else {
-        toast('照片已上传（未配置视觉模型，仅保存照片）', 'ok');
-      }
-      loadCharacters();
-    } catch (e) {
-      toast(e.message, 'err');
-    } finally {
-      hideLoading();
-    }
-  };
-  input.click();
-}
-
+// 上传照片到指定角色（仅保存，不分析）
 async function uploadPhoto(id, file) {
   const fd = new FormData();
-  fd.append('file', file);
+  fd.append('file', file, file.name || 'photo.jpg');
   return await api(`/api/characters/${id}/photo`, { method: 'POST', body: fd });
 }
 
-// 标记角色字段被修改（未保存状态提示）
-function markCharDirty(id) {
-  const el = $('char-dirty-' + id);
-  if (el) el.textContent = '有未保存的修改';
+// 调用 AI 分析接口，返回 {appearance, personality}
+async function analyzePhotoBlob(blob) {
+  const fd = new FormData();
+  fd.append('file', blob, blob.name || 'photo.jpg');
+  return await api('/api/analyze-character-photo', { method: 'POST', body: fd });
 }
 
-// 保存单个角色的所有字段（姓名 + 外貌 + 性格 + 背景 + 补充）
-async function saveCharacter(id) {
-  const name = ($('char-name-' + id) || {}).value || '';
-  const appearance = ($('char-appearance-' + id) || {}).value || '';
-  const personality = ($('char-personality-' + id) || {}).value || '';
-  const background = ($('char-background-' + id) || {}).value || '';
-  const notes = ($('char-notes-' + id) || {}).value || '';
-  if (!name.trim()) return toast('角色姓名不能为空', 'err');
-  try {
-    await api('/api/characters/' + id, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name.trim(), appearance: appearance.trim(), personality: personality.trim(), background: background.trim(), notes: notes.trim() }),
-    });
-    const el = $('char-dirty-' + id);
-    if (el) el.textContent = '已保存';
-    setTimeout(() => { if (el) el.textContent = ''; }, 1500);
-    toast('角色已保存', 'ok');
-    loadCharacters();
-  } catch (e) {
-    toast(e.message, 'err');
+// ================= 添加页照片 =================
+// 选择照片后打开裁剪器
+function onNewPhotoPicked(input) {
+  if (!input.files.length) return;
+  cropFromFile(input.files[0], (blob) => {
+    newCharPhotoBlob = blob;
+    renderNewPhotoPreview();
+    toast('照片已就绪，可点击「AI 分析」识别外貌与性格', 'ok');
+  });
+  input.value = '';
+}
+
+// 渲染添加页照片预览
+function renderNewPhotoPreview() {
+  const wrap = $('c-new-photo-preview');
+  const img = $('c-new-photo-img');
+  if (!wrap || !img) return;
+  // 释放上一个预览的 blob URL，避免重复选择时泄漏内存
+  if (img.src && img.src.indexOf('blob:') === 0) URL.revokeObjectURL(img.src);
+  if (newCharPhotoBlob) {
+    img.src = URL.createObjectURL(newCharPhotoBlob);
+    wrap.style.display = '';
+  } else {
+    img.removeAttribute('src');
+    wrap.style.display = 'none';
   }
 }
 
-async function deleteCharacter(id) {
-  if (!confirm('确定从本小说移除该角色？')) return;
+function rePickNewPhoto() {
+  const input = $('c-new-photo');
+  if (input) input.click();
+}
+
+// 添加页：手动触发 AI 分析已选照片
+async function analyzeNewPhoto() {
+  if (!newCharPhotoBlob) return toast('请先选择并裁切照片', 'err');
+  const appEl = $('c-new-appearance'), perEl = $('c-new-personality');
+  if ((appEl.value.trim() || perEl.value.trim()) && !confirm('外貌/性格已有内容，确定用 AI 分析结果覆盖吗？')) return;
+  showLoading('正在分析人物照片…', 'AI 正在识别外貌、穿着与性格特征，请稍候');
   try {
-    await api('/api/characters/' + id, { method: 'DELETE' });
-    if (state.novel) {
-      const ids = (state.novel.character_ids || []).filter(x => x !== id);
-      const nd = await api('/api/novels/' + state.novel.id, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ character_ids: ids }),
-      });
-      state.novel = nd.novel;
-    }
-    loadCharacters();
-    loadNovels();
+    const r = await analyzePhotoBlob(newCharPhotoBlob);
+    appEl.value = r.appearance || '';
+    perEl.value = r.personality || '';
+    toast('分析完成，请检查并确认后保存', 'ok');
   } catch (e) { toast(e.message, 'err'); }
+  finally { hideLoading(); }
+}
+
+// ================= 照片裁剪器 =================
+let cropCtx = null;  // { img, dw, dh, ox, oy, box:{x,y,w,h}, mode, startX, startY, startBox, onDone }
+
+// 从文件读取图片并打开裁剪模态框（用 dataURL，避免 blob URL 提前 revoke 导致图片加载失败）
+function cropFromFile(file, onDone) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => openCropModal(img, reader.result, onDone);
+    img.onerror = () => toast('无法读取该图片', 'err');
+    img.src = reader.result;
+  };
+  reader.onerror = () => toast('无法读取该图片', 'err');
+  reader.readAsDataURL(file);
+}
+
+// 打开裁剪模态框：计算显示尺寸、居中、默认全图选框
+function openCropModal(img, src, onDone) {
+  const stage = $('crop-stage');
+  const imageEl = $('crop-image');
+  const maxW = Math.min(560, (window.innerWidth || 800) - 40);
+  const maxH = Math.min(420, (window.innerHeight || 700) - 220);
+  const ratio = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight);
+  const dw = Math.max(1, Math.round(img.naturalWidth * ratio));
+  const dh = Math.max(1, Math.round(img.naturalHeight * ratio));
+  imageEl.style.width = dw + 'px';
+  imageEl.style.height = dh + 'px';
+  imageEl.onload = () => {
+    const ox = Math.round((stage.clientWidth - dw) / 2);
+    const oy = Math.round((stage.clientHeight - dh) / 2);
+    imageEl.style.left = ox + 'px';
+    imageEl.style.top = oy + 'px';
+    cropCtx = { img, dw, dh, ox, oy, box: { x: ox, y: oy, w: dw, h: dh }, mode: null, startX: 0, startY: 0, startBox: null, onDone };
+    renderCropBox();
+  };
+  $('crop-overlay').classList.add('show');
+  imageEl.src = src;
+}
+
+function renderCropBox() {
+  if (!cropCtx) return;
+  const box = $('crop-box');
+  const b = cropCtx.box;
+  box.style.left = b.x + 'px';
+  box.style.top = b.y + 'px';
+  box.style.width = b.w + 'px';
+  box.style.height = b.h + 'px';
+}
+
+function closeCropModal() {
+  const ov = $('crop-overlay');
+  if (ov) ov.classList.remove('show');
+  cropCtx = null;
+}
+function cancelCrop() { closeCropModal(); }
+
+// 指针按下：开始移动或缩放选框
+function cropPointerDown(e, mode) {
+  if (!cropCtx) return;
+  e.preventDefault();
+  e.stopPropagation();
+  cropCtx.mode = mode || 'move';
+  cropCtx.startX = e.clientX;
+  cropCtx.startY = e.clientY;
+  cropCtx.startBox = { x: cropCtx.box.x, y: cropCtx.box.y, w: cropCtx.box.w, h: cropCtx.box.h };
+  window.addEventListener('pointermove', cropPointerMove);
+  window.addEventListener('pointerup', cropPointerUp);
+}
+
+function cropPointerMove(e) {
+  const ctx = cropCtx;
+  if (!ctx || !ctx.mode) return;
+  const dx = e.clientX - ctx.startX;
+  const dy = e.clientY - ctx.startY;
+  const sb = ctx.startBox;
+  const b = ctx.box;
+  const MIN = 30;
+  const imgL = ctx.ox, imgT = ctx.oy, imgR = ctx.ox + ctx.dw, imgB = ctx.oy + ctx.dh;
+  if (ctx.mode === 'move') {
+    b.x = Math.max(imgL, Math.min(sb.x + dx, imgR - sb.w));
+    b.y = Math.max(imgT, Math.min(sb.y + dy, imgB - sb.h));
+  } else {
+    if (ctx.mode.indexOf('w') >= 0) {
+      b.x = Math.max(imgL, Math.min(sb.x + dx, sb.x + sb.w - MIN));
+      b.w = sb.x + sb.w - b.x;
+    }
+    if (ctx.mode.indexOf('e') >= 0) {
+      b.w = Math.min(imgR - sb.x, Math.max(MIN, sb.w + dx));
+    }
+    if (ctx.mode.indexOf('n') >= 0) {
+      b.y = Math.max(imgT, Math.min(sb.y + dy, sb.y + sb.h - MIN));
+      b.h = sb.y + sb.h - b.y;
+    }
+    if (ctx.mode.indexOf('s') >= 0) {
+      b.h = Math.min(imgB - sb.y, Math.max(MIN, sb.h + dy));
+    }
+  }
+  renderCropBox();
+}
+
+function cropPointerUp() {
+  if (cropCtx) cropCtx.mode = null;
+  window.removeEventListener('pointermove', cropPointerMove);
+  window.removeEventListener('pointerup', cropPointerUp);
+}
+
+// 确认裁切：canvas 截取选框区域，输出 jpeg blob
+function applyCrop() {
+  const ctx = cropCtx;
+  if (!ctx) return;
+  const b = ctx.box;
+  const sx = (b.x - ctx.ox) / ctx.dw * ctx.img.naturalWidth;
+  const sy = (b.y - ctx.oy) / ctx.dh * ctx.img.naturalHeight;
+  const sw = b.w / ctx.dw * ctx.img.naturalWidth;
+  const sh = b.h / ctx.dh * ctx.img.naturalHeight;
+  const cw = Math.max(1, Math.round(sw));
+  const ch = Math.max(1, Math.round(sh));
+  const canvas = document.createElement('canvas');
+  canvas.width = cw; canvas.height = ch;
+  canvas.getContext('2d').drawImage(ctx.img, sx, sy, sw, sh, 0, 0, cw, ch);
+  const onDone = ctx.onDone;
+  closeCropModal();
+  canvas.toBlob((blob) => {
+    if (blob && onDone) onDone(blob);
+    else if (!blob) toast('裁切失败，请重试', 'err');
+  }, 'image/jpeg', 0.92);
 }
 
 // ================= 小说创作（向导） =================
@@ -1040,7 +1400,7 @@ function novelCardHTML(n) {
       <div class="meta">${esc(n.genre || '未设题材')} · ${n.chapter_count}章 · ${n.words_per_chapter}字/章 · 角色${(n.character_ids || []).length} · 已生成 ${genCount} 章 · 模型${n.text_model_id ? esc(modelLabel(n.text_model_id)) : '（全局）'}</div>
       <div class="row" style="margin-top:10px">
         ${genCount > 0 ? `<button class="btn" onclick="nav('#/novels/${n.id}/read')">阅读</button>` : ''}
-        <button class="btn" onclick="exportNovel('${n.id}')">导出</button>
+        <button class="btn" onclick="exportNovel('${n.id}', 'md')">导出 MD</button>
         <button class="btn" onclick="reopenNovel('${n.id}')">重开</button>
         <span class="spacer"></span>
         <button class="btn danger" onclick="deleteNovel('${n.id}')">删除</button>
@@ -1061,7 +1421,7 @@ function novelCardHTML(n) {
       ${primaryBtn}
       ${genCount > 0 ? `<button class="btn" onclick="nav('#/novels/${n.id}/read')">阅读</button>` : ''}
       <button class="btn" onclick="nav('#/novels/${n.id}/edit')">编辑设定</button>
-      <button class="btn" onclick="exportNovel('${n.id}')">导出</button>
+      <button class="btn" onclick="exportNovel('${n.id}', 'md')">导出 MD</button>
       <button class="btn" onclick="finishNovel('${n.id}')">完结</button>
       <span class="spacer"></span>
       <button class="btn danger" onclick="deleteNovel('${n.id}')">删除</button>
@@ -1140,6 +1500,59 @@ function renderNovels() {
 function gotoNovelPage(p) {
   novelPage = p;
   renderNovels();
+}
+
+// ============ 小说阅读（已完结小说列表） ============
+let readerBackHash = null;  // 阅读页「返回」目标
+
+// 从阅读库进入阅读模式
+function openFromLibrary(id) {
+  readerBackHash = '#/library';
+  nav('#/novels/' + id + '/read');
+}
+
+// 已完结小说卡片
+function libraryCardHTML(n) {
+  const genCount = (n.chapters || []).filter(c => c.content).length;
+  const created = n.created_at ? new Date(n.created_at * 1000).toLocaleString('zh-CN', { hour12: false }) : '';
+  const summary = (n.summary || '').trim();
+  return `
+  <div class="card novel-card library-card">
+    <div class="row">
+      <span class="title">${esc(n.title)}</span>
+      <span class="badge">已完结</span>
+      <span class="badge">${modeLabel(n.mode)}</span>
+      <span class="spacer"></span>
+      ${created ? `<span class="meta">${esc(created)}</span>` : ''}
+    </div>
+    <div class="meta">${esc(n.genre || '未设题材')} · ${genCount} 章 · ${(n.words_per_chapter || 0)}字/章 · 角色 ${(n.character_ids || []).length}</div>
+    ${summary ? `<div class="library-summary">${esc(summary.slice(0, 120))}${summary.length > 120 ? '…' : ''}</div>` : ''}
+    <div class="row" style="margin-top:10px">
+      <button class="btn primary" onclick="openFromLibrary('${n.id}')">开始阅读</button>
+      <button class="btn" onclick="exportNovel('${n.id}', 'md')">导出 MD</button>
+      <button class="btn" onclick="exportNovel('${n.id}', 'epub')">导出 EPUB</button>
+    </div>
+  </div>`;
+}
+
+async function loadLibrary() {
+  try {
+    const d = await api('/api/novels');
+    state.novels = d.novels || [];
+  } catch (e) { toast(e.message, 'err'); }
+  renderLibrary();
+}
+
+function renderLibrary() {
+  const box = $('library-list');
+  if (!box) return;
+  const finished = (state.novels || []).filter(n => n.status === 'finished')
+    .slice().sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
+  if (!finished.length) {
+    box.innerHTML = '<div class="card meta">暂无已完结的小说。在「小说创作」中完成一部小说后，它会出现在这里。</div>';
+    return;
+  }
+  box.innerHTML = finished.map(n => libraryCardHTML(n)).join('');
 }
 
 // ============ 垃圾箱 ============
@@ -1375,7 +1788,8 @@ async function openEditorPage(id) {
     // 若已有大纲，更新"编辑设定"链接指向正确 id
     const editLink = $('gen-edit-link');
     if (editLink) editLink.setAttribute('href', '#/novels/' + id + '/edit');
-    state.wizardStep = 1;
+    state.wizardStep = resumeWizardStep || 1;
+    resumeWizardStep = null;
     renderSteps();
     window.scrollTo({ top: 0 });
   } catch (e) {
@@ -1983,7 +2397,8 @@ async function openReaderPage(id) {
     state.novel = d.novel;
     currentNovelId = id;
     const backLink = $('reader-back-link');
-    if (backLink) backLink.setAttribute('href', '#/novels');
+    if (backLink) backLink.setAttribute('href', readerBackHash || '#/novels');
+    readerBackHash = null;
     renderReader();
     window.scrollTo({ top: 0 });
   } catch (e) {
@@ -2147,6 +2562,14 @@ function renderChapterPage(index) {
       <button class="btn danger" onclick="deleteChapter(${index})">删除本章</button>
     </div>`;
   }
+
+  // 历史版本按钮（仅当章节有内容时显示）
+  if (!isFinished && chapter.content) {
+    html += `<div style="margin:8px 0 16px">
+      <button class="btn" onclick="toggleChapterHistory(${index})">📜 历史版本</button>
+    </div>`;
+  }
+  html += `<div id="chapter-history-panel" style="display:none; margin:8px 0 16px"></div>`;
 
   // 生成实时输出区（默认隐藏）
   html += `<div id="chapter-gen-panel" style="display:none"></div>`;
@@ -2399,6 +2822,73 @@ async function deleteChapter(index) {
   } catch (e) { toast(e.message, 'err'); }
 }
 
+// ---- Chapter Version History ----
+
+let historyPanelVisible = false;
+
+async function toggleChapterHistory(index) {
+  const panel = $('chapter-history-panel');
+  if (!panel) return;
+  if (historyPanelVisible) {
+    panel.style.display = 'none';
+    historyPanelVisible = false;
+    return;
+  }
+  historyPanelVisible = true;
+  panel.style.display = 'block';
+  panel.innerHTML = '<div class="meta">加载中...</div>';
+  try {
+    const n = state.novel;
+    const d = await api(`/api/novels/${n.id}/chapter/${index}/history`);
+    renderHistoryList(index, d.versions || []);
+  } catch (e) {
+    panel.innerHTML = `<div class="meta" style="color:#e74c3c">${esc(e.message)}</div>`;
+  }
+}
+
+function renderHistoryList(index, versions) {
+  const panel = $('chapter-history-panel');
+  if (!panel) return;
+  if (!versions.length) {
+    panel.innerHTML = '<div class="meta">暂无历史版本（编辑或重新生成后会自动保存快照）</div>';
+    return;
+  }
+  let html = '<div class="meta" style="margin-bottom:8px">历史版本（点击「回退」可恢复到该版本）</div>';
+  for (const v of versions) {
+    const ts = new Date(v.created_at * 1000).toLocaleString('zh-CN');
+    const preview = (v.content || '').substring(0, 50);
+    const sourceLabel = v.source === 'ai' ? 'AI生成' : '手动编辑';
+    html += `<div class="card" style="padding:12px; margin:8px 0">
+      <div class="row" style="align-items:center">
+        <span class="meta">${ts}</span>
+        <span class="badge" style="margin-left:8px">${esc(sourceLabel)}</span>
+        <span class="spacer"></span>
+        <span class="meta">${v.word_count || 0} 字</span>
+      </div>
+      <div class="meta" style="margin:6px 0">${esc(preview)}${v.content && v.content.length > 50 ? '...' : ''}</div>
+      <button class="btn" onclick="revertToVersion(${index}, '${v.id}')">↩ 回退到此版本</button>
+    </div>`;
+  }
+  panel.innerHTML = html;
+}
+
+async function revertToVersion(index, versionId) {
+  if (!confirm('确定回退到该版本吗？当前内容将被覆盖。')) return;
+  try {
+    const n = state.novel;
+    const d = await api(`/api/novels/${n.id}/chapter/${index}/revert`, {
+      method: 'POST',
+      body: JSON.stringify({ version_id: versionId }),
+    });
+    state.novel = d.novel;
+    historyPanelVisible = false;
+    const panel = $('chapter-history-panel');
+    if (panel) panel.style.display = 'none';
+    renderChapterPage(index);
+    toast('已回退到指定版本', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
 function addRelation() {
   const rel = { char1_id: '', char2_id: '', type: '', description: '' };
   state.relations.push(rel);
@@ -2451,7 +2941,12 @@ function renderWorkspace() {
   html += `<div style="margin-top:16px">
     <button class="btn primary" onclick="prepareNovel()">${n.summary ? '重新生成大纲' : '① 生成大纲'}</button>
     ${n.chapters && n.chapters.length ? `<button class="btn primary" onclick="generateAll()">② 逐章生成全文（${total} 章）</button>` : ''}
-    <button class="btn" onclick="exportNovel('${n.id}')">导出 Markdown</button>
+    <select id="export-format" style="padding:4px 8px; border-radius:4px; border:1px solid #ccc">
+      <option value="md">Markdown</option>
+      <option value="txt">TXT 纯文本</option>
+      <option value="epub">EPUB 电子书</option>
+    </select>
+    <button class="btn" onclick="exportNovel('${n.id}', document.getElementById('export-format').value)">导出</button>
     ${n.summary ? (outlineEditing
       ? `<button class="btn primary" onclick="saveOutline()">保存大纲</button>
          <button class="btn" onclick="toggleOutlineEdit()">取消</button>`
@@ -2724,16 +3219,17 @@ async function generateAll() {
   toast('全部章节生成完成', 'ok');
 }
 
-async function exportNovel(id) {
+async function exportNovel(id, format) {
   try {
     const headers = {};
     if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
-    const res = await fetch(`/api/novels/${id}/export`, { headers });
+    const fmt = format || 'md';
+    const res = await fetch(`/api/novels/${id}/export?format=${fmt}`, { headers });
     if (res.status === 401) { handleUnauthorized(); return; }
     if (!res.ok) { toast('导出失败', 'err'); return; }
     const blob = await res.blob();
     // 从 Content-Disposition 解析文件名
-    let fname = 'novel.md';
+    let fname = 'novel.' + fmt;
     const cd = res.headers.get('Content-Disposition') || '';
     const m = cd.match(/filename\*=UTF-8''(.+)/) || cd.match(/filename="?([^";]+)"?/);
     if (m) { try { fname = decodeURIComponent(m[1]); } catch (e) { fname = m[1]; } }

@@ -47,6 +47,7 @@ PROMPT_DEFS = {
         "desc": "生成故事梗概、世界观与章节大纲",
         "vars": {
             "title": "小说标题", "genre": "题材类型", "style": "写作风格",
+            "background": "故事背景", "world": "世界观设定", "reference": "参考文本",
             "chapter_count": "目标章节数", "words_per_chapter": "每章字数",
             "characters": "人物设定", "relationships": "人物关系",
         },
@@ -55,6 +56,9 @@ PROMPT_DEFS = {
             "【小说标题】{title}\n"
             "【题材类型】{genre}\n"
             "【写作风格】{style}\n"
+            "【故事背景】\n{background}\n\n"
+            "【世界观设定】\n{world}\n\n"
+            "【参考文本】\n{reference}\n\n"
             "【目标章节数】{chapter_count} 章\n"
             "【每章字数】约 {words_per_chapter} 字\n\n"
             "【人物设定】\n{characters}\n\n"
@@ -70,7 +74,7 @@ PROMPT_DEFS = {
         "desc": "按设定与大纲生成单章正文",
         "vars": {
             "title": "小说标题", "n": "当前章节序号", "genre": "题材类型",
-            "summary": "全书故事梗概", "world": "世界观设定", "outline": "全书章节大纲",
+            "summary": "全书故事梗概", "background": "故事背景", "world": "世界观设定", "outline": "全书章节大纲",
             "ctitle": "当前章节标题", "csummary": "当前章节概要",
             "chars": "人物设定", "rels": "人物关系", "style": "写作风格",
             "reference": "参考原文片段", "prev": "前情提要", "words": "本章目标字数",
@@ -80,6 +84,7 @@ PROMPT_DEFS = {
             "【小说标题】{title}\n"
             "【题材类型】{genre}\n"
             "【全书故事梗概】\n{summary}\n\n"
+            "【故事背景】\n{background}\n\n"
             "【世界观设定】\n{world}\n\n"
             "【全书章节大纲】\n{outline}\n\n"
             "【当前章节】第 {n} 章 {ctitle}｜{csummary}\n\n"

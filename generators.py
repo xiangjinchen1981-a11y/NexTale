@@ -106,11 +106,20 @@ def generate_outline(context, novel):
     characters_info = _format_characters(context, novel)
     relationships_info = _format_relationships(context, novel)
     style = novel.get("style") or "文笔流畅自然，情节紧凑，人物鲜明。"
+    background = novel.get("background") or ""
+    worldbuilding = novel.get("worldbuilding") or ""
+    reference = novel.get("reference_text") or ""
+    # 参考文本只作补充素材，截断避免撑爆上下文
+    if reference:
+        reference = _truncate_text(reference, 6000)
 
     prompt = get_prompt(context, "generate_outline").format(
         title=novel.get("title") or "未命名",
         genre=novel.get("genre") or "不限",
         style=style,
+        background=background or "（暂无背景设定）",
+        world=worldbuilding or "（暂无世界观设定）",
+        reference=reference or "（无）",
         chapter_count=novel.get("chapter_count", 10),
         words_per_chapter=novel.get("words_per_chapter", 2000),
         characters=characters_info,
@@ -153,6 +162,7 @@ def _chapter_prompt_and_params(context, novel, chapter_index):
 
     genre = novel.get("genre") or "不限"
     worldbuilding = novel.get("worldbuilding") or ""
+    background = novel.get("background") or ""
 
     # 参考文本（原著片段）：截断到 2000 字，避免撑爆上下文
     reference = novel.get("reference_text") or ""
@@ -164,6 +174,7 @@ def _chapter_prompt_and_params(context, novel, chapter_index):
         n=chapter_index,
         genre=genre,
         summary=novel.get("summary") or "（暂无）",
+        background=background or "（暂无背景设定）",
         world=worldbuilding or "（暂无世界观设定）",
         outline=_format_outline(chapters),
         ctitle=chapter.get("title", ""),
@@ -175,8 +186,13 @@ def _chapter_prompt_and_params(context, novel, chapter_index):
         prev=prev,
         words=words,
     )
-    # 注入世界书「恒常」条目
-    wb_text = _format_worldbooks(context, only_constant=True)
+    # 注入世界书条目（动态匹配关键词）
+    wb_context = f"{chapter.get('title', '')} {chapter.get('summary', '')} {prev}"
+    if chapter_index > 1:
+        prev_chapter = chapters[chapter_index - 2] if chapter_index - 2 < len(chapters) else None
+        if prev_chapter and prev_chapter.get("content"):
+            wb_context += " " + prev_chapter["content"][-500:]
+    wb_text = _format_worldbooks(context, only_constant=False, context_text=wb_context)
     if wb_text:
         prompt += "\n\n【世界书设定】\n" + wb_text
     return provider, model, mcfg, prompt, words, max_tokens
@@ -298,8 +314,9 @@ def _improv_chapter_prompt_and_params(context, novel, chapter_index, instruction
         instruction=instruction or "（无特别指引，请自然推进剧情）",
         words=words,
     )
-    # 注入世界书「恒常」条目
-    wb_text = _format_worldbooks(context, only_constant=True)
+    # 注入世界书条目（动态匹配关键词）
+    wb_context = f"{instruction} {prev} {referenced}"
+    wb_text = _format_worldbooks(context, only_constant=False, context_text=wb_context)
     if wb_text:
         prompt += "\n\n【世界书设定】\n" + wb_text
     return provider, model, mcfg, prompt, words, max_tokens
@@ -403,22 +420,79 @@ def replace_progress_entry(progress_summary, chapter_index, new_summary):
 
 # ---------- 格式化与解析辅助 ----------
 
-def _format_worldbooks(context, only_constant=True):
+def _match_worldbook_entry(entry, context_text):
+    """判断单条世界书条目是否应被注入当前上下文。
+
+    匹配规则（SillyTavern 风格）：
+    - constant=True → 无条件匹配
+    - selective=True → key 中至少一个 AND keysecondary 中至少一个出现在 context_text
+    - 其他 → key 中至少一个出现在 context_text
+    匹配成功后按 probability 概率掷骰。
+    """
+    if not entry.get("enabled", True):
+        return False
+    if entry.get("constant"):
+        return True
+    if not context_text:
+        return False
+
+    case_sensitive = entry.get("case_sensitive", False)
+    text = context_text if case_sensitive else context_text.lower()
+
+    def _has_key(keys):
+        for k in keys:
+            k = k.strip()
+            if not k:
+                continue
+            needle = k if case_sensitive else k.lower()
+            if needle in text:
+                return True
+        return False
+
+    keys = entry.get("key") or []
+    if isinstance(keys, str):
+        keys = [keys]
+    keysecondary = entry.get("keysecondary") or []
+    if isinstance(keysecondary, str):
+        keysecondary = [keysecondary]
+
+    if entry.get("selective"):
+        matched = _has_key(keys) and _has_key(keysecondary)
+    else:
+        matched = _has_key(keys)
+
+    if not matched:
+        return False
+
+    if entry.get("useProbability", True):
+        prob = entry.get("probability", 100)
+        if prob is not None and 0 <= prob < 100:
+            import random
+            if random.randint(1, 100) > prob:
+                return False
+    return True
+
+
+def _format_worldbooks(context, only_constant=True, context_text=""):
     """把世界书条目格式化为 prompt 文本。
 
     only_constant=True 时只取「恒常注入」条目（constant=True 且 enabled），
-    这些条目无条件加入上下文；False 时取所有启用条目。
+    这些条目无条件加入上下文；False 时根据关键词匹配动态选择条目。
     返回空字符串表示没有可注入的条目。
     """
     wbs = context.get("worldbooks") or []
-    parts = []
+    matched = []
     for wb in wbs:
         entries = wb.get("entries") or []
         for e in entries:
             if e.get("enabled") is False:
                 continue
-            if only_constant and not e.get("constant"):
-                continue
+            if only_constant:
+                if not e.get("constant"):
+                    continue
+            else:
+                if not _match_worldbook_entry(e, context_text):
+                    continue
             content = (e.get("content") or "").strip()
             if not content:
                 continue
@@ -427,10 +501,11 @@ def _format_worldbooks(context, only_constant=True):
             line = content
             if key_str:
                 line = f"（触发词：{key_str}）{content}"
-            parts.append(line)
-    if not parts:
+            matched.append((e.get("insertion_order", 0) or 0, line))
+    if not matched:
         return ""
-    return "\n\n".join(parts)
+    matched.sort(key=lambda x: x[0])
+    return "\n\n".join(line for _, line in matched)
 
 
 def _format_characters(context, novel):
@@ -626,8 +701,9 @@ def _dialog_prompt(context, novel, user_text, history, word_limit=500):
         user=user_text,
         limit=word_limit,
     )
-    # 注入世界书「恒常」条目
-    wb_text = _format_worldbooks(context, only_constant=True)
+    # 注入世界书条目（动态匹配关键词）
+    wb_context = f"{history_text} {user_text}"
+    wb_text = _format_worldbooks(context, only_constant=False, context_text=wb_context)
     if wb_text:
         prompt += "\n\n【世界书设定】\n" + wb_text
     return prompt

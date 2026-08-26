@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS novels (
   text_model_id TEXT NOT NULL DEFAULT '',
   mode TEXT NOT NULL DEFAULT 'outline',
   dialog_messages TEXT NOT NULL DEFAULT '[]',
+  worldbuilding_source TEXT NOT NULL DEFAULT 'manual',
   created_at REAL NOT NULL DEFAULT 0,
   deleted_at REAL NOT NULL DEFAULT 0
 );
@@ -120,9 +121,21 @@ CREATE TABLE IF NOT EXISTS worldbooks (
   entries TEXT NOT NULL DEFAULT '[]',
   created_at REAL NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS chapter_versions (
+  id TEXT PRIMARY KEY,
+  novel_id TEXT NOT NULL,
+  chapter_idx INTEGER NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  summary TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL DEFAULT '',
+  word_count INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'manual',
+  created_at REAL NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_models_provider ON models(provider_id);
 CREATE INDEX IF NOT EXISTS idx_chapters_novel ON chapters(novel_id, idx);
 CREATE INDEX IF NOT EXISTS idx_logs_created ON request_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_chapter_versions ON chapter_versions(novel_id, chapter_idx);
 """
 
 
@@ -139,6 +152,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE novels ADD COLUMN deleted_at REAL NOT NULL DEFAULT 0")
     if "dialog_messages" not in cols:
         conn.execute("ALTER TABLE novels ADD COLUMN dialog_messages TEXT NOT NULL DEFAULT '[]'")
+    if "worldbuilding_source" not in cols:
+        conn.execute("ALTER TABLE novels ADD COLUMN worldbuilding_source TEXT NOT NULL DEFAULT 'manual'")
 
     mcols = {r[1] for r in conn.execute("PRAGMA table_info(models)")}
     if "context_length" not in mcols:
@@ -357,8 +372,9 @@ def save_novels(novels):
             conn.execute(
                 "INSERT OR REPLACE INTO novels (id, title, genre, style, reference_text, character_ids, "
                 "relationships, chapter_count, words_per_chapter, summary, worldbuilding, background, "
-                "progress_summary, status, text_model_id, mode, dialog_messages, created_at, deleted_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "progress_summary, status, text_model_id, mode, dialog_messages, worldbuilding_source, "
+                "created_at, deleted_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (nid, n.get("title", ""), n.get("genre", ""), n.get("style", ""),
                  n.get("reference_text", ""), json.dumps(n.get("character_ids", [])),
                  json.dumps(n.get("relationships", [])), n.get("chapter_count", 10),
@@ -366,6 +382,7 @@ def save_novels(novels):
                  n.get("worldbuilding", ""), n.get("background", ""), n.get("progress_summary", ""),
                  n.get("status", "draft"), n.get("text_model_id", ""),
                  n.get("mode", "outline"), json.dumps(n.get("dialog_messages", [])),
+                 n.get("worldbuilding_source", "manual"),
                  n.get("created_at", 0), n.get("deleted_at", 0)),
             )
             # 重建本章节（先删后插，保证与传入数据一致）
@@ -638,6 +655,68 @@ def delete_worldbook(wb_id):
     conn = _connect()
     try:
         conn.execute("DELETE FROM worldbooks WHERE id = ?", (wb_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ---- Chapter Version History ----
+
+def snapshot_chapter(novel_id, chapter_idx, source="manual"):
+    """把当前章节内容快照到 chapter_versions（仅当有 content 时）。"""
+    n = get_novel(novel_id)
+    if not n:
+        return None
+    ch = next((c for c in n.get("chapters", []) if c.get("index") == chapter_idx), None)
+    if not ch or not ch.get("content"):
+        return None
+    conn = _connect()
+    try:
+        vid = new_id()
+        conn.execute(
+            "INSERT INTO chapter_versions (id, novel_id, chapter_idx, title, summary, "
+            "content, word_count, source, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (vid, novel_id, chapter_idx, ch.get("title", ""), ch.get("summary", ""),
+             ch["content"], ch.get("word_count", 0), source, time.time()),
+        )
+        conn.commit()
+        return vid
+    finally:
+        conn.close()
+
+
+def list_chapter_versions(novel_id, chapter_idx):
+    """返回某章节的历史版本列表（按时间倒序）。"""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM chapter_versions WHERE novel_id=? AND chapter_idx=? ORDER BY created_at DESC",
+            (novel_id, chapter_idx),
+        )
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_chapter_version(version_id):
+    """返回单个版本详情。"""
+    conn = _connect()
+    try:
+        r = conn.execute("SELECT * FROM chapter_versions WHERE id=?", (version_id,)).fetchone()
+        return dict(r) if r else None
+    finally:
+        conn.close()
+
+
+def delete_chapter_versions(novel_id, chapter_idx=None):
+    """删除指定章节（或全部）的历史版本。"""
+    conn = _connect()
+    try:
+        if chapter_idx is not None:
+            conn.execute("DELETE FROM chapter_versions WHERE novel_id=? AND chapter_idx=?",
+                         (novel_id, chapter_idx))
+        else:
+            conn.execute("DELETE FROM chapter_versions WHERE novel_id=?", (novel_id,))
         conn.commit()
     finally:
         conn.close()
