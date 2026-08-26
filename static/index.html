@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>织叙-NexTale</title>
-  <link rel="stylesheet" href="style.css?v=20260826o">
+  <link rel="stylesheet" href="style.css?v=20260827c">
 </head>
 <body>
   <header class="topbar">
@@ -210,7 +210,14 @@
         <span class="spacer"></span>
         <button class="btn primary" onclick="goAddCharacterFromList()">＋ 添加角色</button>
       </div>
-      <p class="hint">以照片卡片展示全部角色，点击卡片进入详情页查看与编辑。</p>
+      <div class="character-filter-row">
+        <label class="character-filter-label">小说名称
+          <select id="character-novel-filter" onchange="onCharacterNovelFilter()">
+            <option value="">最新角色（默认）</option>
+          </select>
+        </label>
+      </div>
+      <p class="hint" id="character-grid-hint">展示最新的角色。</p>
       <div id="character-grid" class="char-grid"></div>
     </section>
 
@@ -373,31 +380,13 @@
       </div>
 
       <div class="step-indicator">
-        <span class="step" id="step-dot-1">① 创作模型与提示词</span>
-        <span class="step" id="step-dot-2">② 基本信息</span>
-        <span class="step" id="step-dot-3">③ 角色设定</span>
+        <span class="step" id="step-dot-1" onclick="goStep(1)">① 基本信息</span>
+        <span class="step" id="step-dot-2" onclick="goStep(2)">② 角色设定</span>
+        <span class="step" id="step-dot-3" onclick="goStep(3)">③ 模型与提示词</span>
       </div>
 
-      <!-- 步骤 1：创作模型 + 全局前置提示词 -->
+      <!-- 步骤 1：基本信息 -->
       <div id="step-1" class="step-panel">
-        <h3>创作模型与前置提示词</h3>
-        <div class="form-grid">
-          <label>创作模型
-            <select id="n-model"></select>
-          </label>
-        </div>
-        <div class="card global-prompt-card">
-          <span class="title">全局前置提示词</span>
-          <p class="hint">对所有 AI 生成（大纲、章节正文、风格分析、人物照片分析）统一生效的创作指令，例如：全文使用古文对话、避免现代词汇、整体基调偏喜剧等。留空则不加。</p>
-          <textarea id="global-prompt" rows="8" placeholder=""></textarea>
-        </div>
-        <div style="margin-top:16px">
-          <button class="btn primary" onclick="saveGlobalPrompt(); goStep(2)">下一步：基本信息 →</button>
-        </div>
-      </div>
-
-      <!-- 步骤 2：基本信息 -->
-      <div id="step-2" class="step-panel" style="display:none">
         <h3>基本信息</h3>
         <div class="form-grid">
           <label>小说标题
@@ -457,16 +446,31 @@
           <textarea id="n-reference" rows="5" placeholder="粘贴参考小说片段…（可选）"></textarea>
         </label>
         <div style="margin-top:16px">
-          <button class="btn" onclick="goStep(1)">← 上一步</button>
-          <button class="btn primary" onclick="saveNovelBasics()">下一步：角色设定 →</button>
+          <button class="btn primary" onclick="saveNovelBasics()">保存基本信息</button>
+          <button class="btn" onclick="goStep(2)">下一步：角色设定 →</button>
         </div>
       </div>
 
-      <!-- 步骤 3：角色设定 -->
-      <div id="step-3" class="step-panel" style="display:none">
+      <!-- 步骤 2：角色设定 -->
+      <div id="step-2" class="step-panel" style="display:none">
         <h3>角色设定</h3>
-        <p class="hint">在「角色库」中统一管理角色：上传照片、AI 自动分析外貌与性格。点击卡片进入详情编辑；添加的角色会自动归入本小说。</p>
-        <button class="btn primary" onclick="goAddCharacterFromWizard()">＋ 添加角色</button>
+        <p class="hint">在「角色库」中统一管理角色：上传照片、AI 自动分析外貌与性格。可从角色库选择已有角色（一个角色可同时属于多部小说），也可新建角色。</p>
+        <div class="row" style="gap:10px">
+          <button class="btn" onclick="goAddCharacterFromWizard()">＋ 新建角色</button>
+          <button class="btn primary" onclick="toggleCharacterPicker()">从角色库选择</button>
+        </div>
+
+        <!-- 角色选择面板（从角色库勾选已有角色） -->
+        <div id="character-picker" class="card" style="display:none; margin-top:12px">
+          <div class="row">
+            <span class="title">从角色库选择角色</span>
+            <span class="spacer"></span>
+            <button class="btn" onclick="toggleCharacterPicker()">关闭</button>
+          </div>
+          <p class="hint">勾选角色加入本小说（一个角色可属于多部小说），取消勾选即从本小说移除。</p>
+          <div id="character-picker-list" class="character-picker-list"></div>
+        </div>
+
         <div id="character-list" class="char-grid" style="margin-top:16px"></div>
 
         <h4 style="margin-top:20px">人物关系设定</h4>
@@ -474,8 +478,29 @@
         <button class="btn" onclick="addRelation()">＋ 添加关系</button>
 
         <div style="margin-top:20px">
+          <button class="btn" onclick="goStep(1)">← 上一步</button>
+          <button class="btn primary" onclick="saveNovelCharsOnly()">保存角色设定</button>
+          <button class="btn" onclick="goStep(3)">下一步：模型与提示词 →</button>
+        </div>
+      </div>
+
+      <!-- 步骤 3：模型与提示词 -->
+      <div id="step-3" class="step-panel" style="display:none">
+        <h3>创作模型与前置提示词</h3>
+        <div class="form-grid">
+          <label>创作模型
+            <select id="n-model"></select>
+          </label>
+        </div>
+        <div class="card global-prompt-card">
+          <span class="title">全局前置提示词</span>
+          <p class="hint">对所有 AI 生成（大纲、章节正文、风格分析、人物照片分析）统一生效的创作指令，例如：全文使用古文对话、避免现代词汇、整体基调偏喜剧等。留空则不加。</p>
+          <textarea id="global-prompt" rows="8" placeholder=""></textarea>
+        </div>
+        <div style="margin-top:16px">
           <button class="btn" onclick="goStep(2)">← 上一步</button>
-          <button class="btn primary" onclick="saveNovelChars()">完成，进入生成 →</button>
+          <button class="btn primary" onclick="saveNovelModelAndPrompt()">保存模型与提示词</button>
+          <button class="btn primary" onclick="saveNovelModelAndPrompt(true)">保存并进入生成 →</button>
         </div>
       </div>
     </section>
@@ -647,6 +672,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260826q"></script>
+  <script src="app.js?v=20260827d"></script>
 </body>
 </html>

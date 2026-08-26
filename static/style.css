@@ -495,7 +495,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 }
 
 .step-indicator { display: flex; gap: 8px; margin: 16px 0; flex-wrap: wrap; }
-.step { padding: 8px 16px; border-radius: 999px; background: var(--card); border: 1px solid var(--border); color: var(--muted); font-size: 14px; }
+.step { padding: 8px 16px; border-radius: 999px; background: var(--card); border: 1px solid var(--border); color: var(--muted); font-size: 14px; cursor: pointer; user-select: none; }
+.step:hover { border-color: var(--accent); }
 .step.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 .step.done { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft); }
 .step-panel { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 12px; }
@@ -1152,6 +1153,70 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* ============ 角色库筛选 ============ */
+.character-filter-row {
+  margin: 12px 0 8px;
+}
+.character-filter-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.character-filter-label select {
+  width: 400px;
+  max-width: 100%;
+  padding: 8px 12px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card, #fff);
+  color: var(--text);
+}
+
+/* 角色选择面板（从角色库勾选已有角色） */
+.character-picker-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.character-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.character-picker-item:hover { border-color: var(--accent); }
+.character-picker-item input[type="checkbox"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+.character-picker-item .char-cover-ph,
+.character-picker-item img {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+.character-picker-name {
+  font-size: 14px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ============ 照片裁剪器 ============ */

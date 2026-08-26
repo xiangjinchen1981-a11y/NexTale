@@ -153,7 +153,7 @@ async function doLogin() {
     try {
       await loadSettings();
       await loadProviders();
-      await loadCharacters();
+      await loadAllCharacters();
       await loadGenres();
     } catch (e) { /* 忽略，路由加载时还会再触发 */ }
     location.hash = '#/novels';
@@ -274,7 +274,8 @@ async function router() {
       // 角色库列表页
       resumeWizardStep = null;
       showView('characters');
-      await loadCharacters();
+      await loadCharacterNovels();       // 加载小说下拉
+      await loadCharacters('');          // 默认加载最新 20 个角色
       renderCharacterGrid();
       return;
     }
@@ -856,8 +857,29 @@ let charAssignNovelId = null;    // 从小说向导进入添加页时，新角�
 let resumeWizardStep = null;     // 从角色页返回小说编辑页时恢复的向导步骤
 let newCharPhotoBlob = null;     // 添加页已裁剪、待上传的照片
 
-async function loadCharacters() {
-  const d = await api('/api/characters');
+// 角色库小说筛选下拉数据（与角色列表分开，按需加载）
+let characterNovelList = [];
+
+// 加载小说列表（仅用于筛选下拉，不含角色）
+async function loadCharacterNovels() {
+  const d = await api('/api/characters/novels');
+  characterNovelList = d.novels || [];
+  renderCharacterNovelFilter();
+}
+
+// 按需加载角色：novelId 为空则加载最新 20 个，否则加载该小说角色
+async function loadCharacters(novelId) {
+  let url = '/api/characters';
+  if (novelId) {
+    url = '/api/characters?novel_id=' + encodeURIComponent(novelId);
+  }
+  const d = await api(url);
+  state.characters = d.characters;
+}
+
+// 加载全部角色（小说向导/详情等需要跨小说匹配的场景）
+async function loadAllCharacters() {
+  const d = await api('/api/characters?limit=10000');
   state.characters = d.characters;
 }
 
@@ -877,15 +899,33 @@ function charCoverHTML(c) {
   </div>`;
 }
 
-// 角色库列表页：照片卡片网格
+// 角色库列表页：照片卡片网格（state.characters 已是按需加载后的结果）
 function renderCharacterGrid() {
   const box = $('character-grid');
   if (!box) return;
-  const chars = state.characters;
+  const hintEl = $('character-grid-hint');
+  const sel = $('character-novel-filter');
+  const novelId = sel ? sel.value : '';
+
+  const chars = state.characters || [];
+
+  if (hintEl) {
+    if (novelId) {
+      const novel = (characterNovelList || []).find(n => n.id === novelId);
+      hintEl.textContent = novel ? `《${novel.title || '未命名'}》共 ${chars.length} 个角色。` : '该小说暂无角色。';
+    } else {
+      hintEl.textContent = `展示最新的 ${chars.length} 个角色。`;
+    }
+  }
+
   if (!chars.length) {
-    box.innerHTML = '<div class="card meta" style="grid-column:1/-1">暂无角色，点击右上角「添加角色」创建你的第一个角色。</div>';
+    const emptyMsg = novelId
+      ? '该小说暂无角色，点击右上角「添加角色」创建，或在小说创作向导中添加。'
+      : '暂无角色，点击右上角「添加角色」创建你的第一个角色。';
+    box.innerHTML = `<div class="card meta" style="grid-column:1/-1">${emptyMsg}</div>`;
     return;
   }
+
   box.innerHTML = chars.map(c => `
     <div class="char-grid-card">
       <div class="char-grid-cover" onclick="openCharFromList('${c.id}')" title="点击查看/编辑角色">
@@ -896,6 +936,27 @@ function renderCharacterGrid() {
         <div class="meta">${esc((c.appearance || '').slice(0, 40)) || '暂无外貌描述'}</div>
       </div>
     </div>`).join('');
+}
+
+// 小说筛选下拉：填充选项（保留当前选中）
+function renderCharacterNovelFilter() {
+  const sel = $('character-novel-filter');
+  if (!sel) return;
+  const prev = sel.value;
+  const novels = characterNovelList || [];
+  sel.innerHTML = '<option value="">最新角色（默认）</option>' + novels.map(n =>
+    `<option value="${esc(n.id)}">${esc(n.title || '未命名')}</option>`).join('');
+  if (prev && novels.some(n => n.id === prev)) {
+    sel.value = prev;
+  }
+}
+
+// 筛选下拉变更：按需请求对应小说的角色
+async function onCharacterNovelFilter() {
+  const sel = $('character-novel-filter');
+  const novelId = sel ? sel.value : '';
+  await loadCharacters(novelId);
+  renderCharacterGrid();
 }
 
 // 小说向导（步骤3）：当前小说角色的照片卡片网格
@@ -930,7 +991,7 @@ function openCharFromList(id) {
 // —— 小说向导入口：点卡片进详情，返回时回到向导步骤3 ——
 async function openCharFromWizard(id) {
   charBackHash = state.novel ? ('#/novels/' + state.novel.id + '/edit') : '#/characters';
-  resumeWizardStep = 3;
+  resumeWizardStep = 2;
   await persistNovelCharsSilently();
   nav('#/characters/' + id);
 }
@@ -940,10 +1001,11 @@ function goBackFromCharacter() {
   nav(charBackHash || '#/characters');
 }
 
-// 添加角色（角色库入口）
+// 添加角色（角色库入口：新角色自动归入当前筛选的小说）
 function goAddCharacterFromList() {
   charBackHash = '#/characters';
-  charAssignNovelId = null;
+  const sel = $('character-novel-filter');
+  charAssignNovelId = sel && sel.value ? sel.value : null;
   resumeWizardStep = null;
   nav('#/characters/new');
 }
@@ -953,9 +1015,63 @@ async function goAddCharacterFromWizard() {
   if (!state.novel) return toast('请先完成基本信息', 'err');
   charBackHash = '#/novels/' + state.novel.id + '/edit';
   charAssignNovelId = state.novel.id;
-  resumeWizardStep = 3;
+  resumeWizardStep = 2;
   await persistNovelCharsSilently();
   nav('#/characters/new');
+}
+
+// —— 从角色库选择已有角色（一个角色可属于多部小说） ——
+async function toggleCharacterPicker() {
+  const panel = $('character-picker');
+  if (!panel) return;
+  const isHidden = panel.style.display === 'none';
+  if (isHidden) {
+    await loadAllCharacters();  // 确保拿到全量角色
+    renderCharacterPicker();
+    panel.style.display = 'block';
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+function renderCharacterPicker() {
+  const box = $('character-picker-list');
+  if (!box) return;
+  const chars = state.characters || [];
+  const currentIds = (state.novel && state.novel.character_ids) || [];
+  if (!chars.length) {
+    box.innerHTML = '<div class="meta">角色库为空，请先「新建角色」。</div>';
+    return;
+  }
+  box.innerHTML = chars.map(c => {
+    const checked = currentIds.includes(c.id);
+    return `
+    <label class="character-picker-item">
+      <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleNovelCharacter('${c.id}', this.checked)">
+      ${charCoverHTML(c)}
+      <span class="character-picker-name">${esc(c.name || '未命名')}</span>
+    </label>`;
+  }).join('');
+}
+
+// 勾选/取消勾选：把角色加入或移出本小说
+async function toggleNovelCharacter(id, checked) {
+  if (!state.novel) return;
+  let ids = (state.novel.character_ids || []).slice();
+  if (checked) {
+    if (!ids.includes(id)) ids.push(id);
+  } else {
+    ids = ids.filter(x => x !== id);
+  }
+  try {
+    const nd = await api('/api/novels/' + state.novel.id, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ character_ids: ids }),
+    });
+    state.novel = nd.novel;
+    renderCharacters();       // 刷新本小说角色网格
+    renderCharacterPicker();  // 刷新选择面板勾选状态
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 // 静默保存小说当前角色与关系（避免离开向导时丢失手动输入）
@@ -1020,7 +1136,7 @@ async function saveNewCharacter() {
       } catch (e) { /* 忽略 */ }
       charAssignNovelId = null;
     }
-    await loadCharacters();
+    await loadAllCharacters();
     toast('角色已添加', 'ok');
     // 进入详情页继续完善
     nav('#/characters/' + cid);
@@ -1029,7 +1145,7 @@ async function saveNewCharacter() {
 
 // 详情页：加载角色
 async function openCharacterDetail(id) {
-  if (!state.characters.length) { await loadCharacters(); }
+  if (!state.characters.length) { await loadAllCharacters(); }
   const c = state.characters.find(x => x.id === id);
   if (!c) { toast('角色不存在', 'err'); nav('#/characters'); return; }
   charDetailId = id;
@@ -1067,7 +1183,7 @@ async function saveCharacterDetail() {
         notes: $('c-detail-notes').value.trim(),
       }),
     });
-    await loadCharacters();
+    await loadAllCharacters();
     const title = $('character-detail-title');
     if (title) title.textContent = '角色详情 · ' + name;
     toast('角色已保存', 'ok');
@@ -1087,7 +1203,7 @@ function uploadDetailPhoto() {
       try {
         await uploadPhoto(id, blob);
         toast('照片已更新', 'ok');
-        await loadCharacters();
+        await loadAllCharacters();
         openCharacterDetail(id);
       } catch (e) { toast(e.message, 'err'); }
       finally { hideLoading(); }
@@ -1125,7 +1241,7 @@ async function deleteCharacterDetail() {
   if (!confirm('确定删除该角色？此操作不可恢复。')) return;
   try {
     await api('/api/characters/' + id, { method: 'DELETE' });
-    await loadCharacters();
+    await loadAllCharacters();
     toast('角色已删除', 'ok');
     goBackFromCharacter();
   } catch (e) { toast(e.message, 'err'); }
@@ -1142,7 +1258,7 @@ async function removeCharacterFromNovel(id) {
       body: JSON.stringify({ character_ids: ids }),
     });
     state.novel = nd.novel;
-    await loadCharacters();
+    await loadAllCharacters();
     renderCharacters();
     renderRelations();
     loadNovels();
@@ -1758,7 +1874,7 @@ function renderSteps() {
       dot.classList.toggle('done', i < state.wizardStep);
     }
   });
-  if (state.wizardStep === 3) {
+  if (state.wizardStep === 2) {
     renderCharacters();
     renderRelations();
   }
@@ -1776,7 +1892,6 @@ async function saveNovelBasics() {
     worldbuilding: $('n-worldbuilding').value.trim(),
     chapter_count: parseInt($('n-chapters').value) || 10,
     words_per_chapter: parseInt($('n-words').value) || 2000,
-    text_model_id: $('n-model').value || '',
     mode: $('n-mode').value || 'outline',
     source_text: $('n-source').value.trim(),
     task_instruction: $('n-task-instruction').value.trim(),
@@ -1795,13 +1910,13 @@ async function saveNovelBasics() {
     if (window.location.hash.includes('/new')) {
       history.replaceState(null, '', '#/novels/' + state.novel.id + '/edit');
     }
-    goStep(3);
     loadNovels();
   } catch (e) { toast(e.message, 'err'); }
 }
 
-async function saveNovelChars() {
-  if (!state.novel) return toast('请先完成基本信息', 'err');
+// 只保存角色设定（不跳转），供步骤2的「保存角色设定」按钮使用
+async function saveNovelCharsOnly() {
+  if (!state.novel) return toast('请先保存基本信息', 'err');
   const body = {
     character_ids: state.novel.character_ids || [],
     relationships: state.relations.filter(r => r.char1_id && r.char2_id && r.char1_id !== r.char2_id),
@@ -1813,17 +1928,36 @@ async function saveNovelChars() {
     state.novel = d.novel;
     toast('角色设定已保存', 'ok');
     loadNovels();
-    // 根据创作模式跳转：即兴 → 即兴写作页；对话 → 对话页；改写 → 改写页；续写 → 续写页；大纲 → 章节生成页
-    if (state.novel.mode === 'improv') {
-      nav('#/novels/' + state.novel.id + '/improv');
-    } else if (state.novel.mode === 'dialog') {
-      nav('#/novels/' + state.novel.id + '/dialog');
-    } else if (state.novel.mode === 'rewrite') {
-      nav('#/novels/' + state.novel.id + '/rewrite');
-    } else if (state.novel.mode === 'continue') {
-      nav('#/novels/' + state.novel.id + '/continue');
-    } else {
-      nav('#/novels/' + state.novel.id + '/generate');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// 保存模型选择 + 全局前置提示词；goNext 为 true 时保存后跳转到生成页
+async function saveNovelModelAndPrompt(goNext = false) {
+  if (!state.novel) return toast('请先保存基本信息', 'err');
+  try {
+    // 保存小说级模型选择
+    const modelId = $('n-model').value || '';
+    const d = await api('/api/novels/' + state.novel.id, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text_model_id: modelId }),
+    });
+    state.novel = d.novel;
+    // 保存全局前置提示词
+    await saveGlobalPrompt();
+    toast('模型与提示词已保存', 'ok');
+    if (goNext) {
+      // 根据创作模式跳转
+      if (state.novel.mode === 'improv') {
+        nav('#/novels/' + state.novel.id + '/improv');
+      } else if (state.novel.mode === 'dialog') {
+        nav('#/novels/' + state.novel.id + '/dialog');
+      } else if (state.novel.mode === 'rewrite') {
+        nav('#/novels/' + state.novel.id + '/rewrite');
+      } else if (state.novel.mode === 'continue') {
+        nav('#/novels/' + state.novel.id + '/continue');
+      } else {
+        nav('#/novels/' + state.novel.id + '/generate');
+      }
     }
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -3089,7 +3223,13 @@ async function streamApi(path, onEvent, body) {
     headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(path, opts);
+  let res;
+  try {
+    res = await fetch(path, opts);
+  } catch (e) {
+    // 网络层错误（连接中断/代理超时等），转为友好中文提示
+    throw new Error('网络连接中断，请重试。若原文较长，可尝试稍后重试或检查网络/代理设置。');
+  }
   if (res.status === 401) {
     handleUnauthorized();
     throw new Error('未登录或登录已过期');
@@ -3106,9 +3246,16 @@ async function streamApi(path, onEvent, body) {
   const decoder = new TextDecoder('utf-8');
   let buf = '';
   while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
+    let chunk;
+    try {
+      const r = await reader.read();
+      if (r.done) break;
+      chunk = r.value;
+    } catch (e) {
+      // 读取 SSE 流时连接中断
+      throw new Error('网络连接中断，请重试。若原文较长，可尝试稍后重试或检查网络/代理设置。');
+    }
+    buf += decoder.decode(chunk, { stream: true });
     let idx;
     while ((idx = buf.indexOf('\n')) >= 0) {
       const line = buf.slice(0, idx).trim();
@@ -4347,7 +4494,7 @@ async function analyzeSourceProfile() {
   try {
     await loadSettings();
     await loadProviders();
-    await loadCharacters();
+    await loadAllCharacters();
     await loadGenres();
     // 根据 hash 路由进入对应视图
     await router();

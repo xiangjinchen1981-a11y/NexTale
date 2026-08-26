@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS characters (
   personality TEXT NOT NULL DEFAULT '',
   background TEXT NOT NULL DEFAULT '',
   notes TEXT NOT NULL DEFAULT '',
-  photo_path TEXT NOT NULL DEFAULT ''
+  photo_path TEXT NOT NULL DEFAULT '',
+  created_at REAL NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS novels (
   id TEXT PRIMARY KEY,
@@ -175,6 +176,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     lcols = {r[1] for r in conn.execute("PRAGMA table_info(request_logs)")}
     if "name" not in lcols:
         conn.execute("ALTER TABLE request_logs ADD COLUMN name TEXT NOT NULL DEFAULT ''")
+
+    charcols = {r[1] for r in conn.execute("PRAGMA table_info(characters)")}
+    if "created_at" not in charcols:
+        conn.execute("ALTER TABLE characters ADD COLUMN created_at REAL NOT NULL DEFAULT 0")
 
 
 def _connect() -> sqlite3.Connection:
@@ -296,9 +301,10 @@ def save_settings(settings):
 
 # ---- Characters ----
 def list_characters():
+    """按创建时间倒序返回所有角色（最新在前）。"""
     conn = _connect()
     try:
-        return [dict(r) for r in conn.execute("SELECT * FROM characters")]
+        return [dict(r) for r in conn.execute("SELECT * FROM characters ORDER BY created_at DESC")]
     finally:
         conn.close()
 
@@ -309,11 +315,11 @@ def save_characters(characters):
         conn.execute("DELETE FROM characters")
         for c in characters:
             conn.execute(
-                "INSERT INTO characters (id, name, appearance, personality, background, notes, photo_path) "
-                "VALUES (?,?,?,?,?,?,?)",
+                "INSERT INTO characters (id, name, appearance, personality, background, notes, photo_path, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
                 (c.get("id") or new_id(), c.get("name", ""), c.get("appearance", ""),
                  c.get("personality", ""), c.get("background", ""), c.get("notes", ""),
-                 c.get("photo_path", "")),
+                 c.get("photo_path", ""), c.get("created_at", time.time())),
             )
         conn.commit()
     finally:

@@ -892,21 +892,148 @@ def continue_chapter_stream(context, novel, chapter_index, instruction=""):
 # ---------- 原著结构化拆解（续写模式） ----------
 
 def _extract_json(text):
-    """从模型输出中提取 JSON 对象（剥掉 ```json 代码围栏等）。"""
+    """从模型输出中提取 JSON 对象（剥掉代码围栏、修复常见格式问题）。"""
     text = (text or "").strip()
     if not text:
         raise AIClientError("模型未返回内容")
+
+    candidates = [text]
+
+    # 1. 剥掉 ```json ... ``` 代码围栏
     m = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.S)
     if m:
-        text = m.group(1).strip()
+        candidates.append(m.group(1).strip())
+
+    # 2. 用括号配对提取首个 { 到匹配的 }（比 rfind 更可靠）
     start = text.find("{")
-    end = text.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        raise AIClientError("模型未返回有效的 JSON 结构")
+    if start != -1:
+        depth = 0
+        in_str = False
+        esc = False
+        end = -1
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+            else:
+                if ch == '"':
+                    in_str = True
+                elif ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i
+                        break
+        if end != -1:
+            candidates.append(text[start:end + 1])
+
+    # 3. 逐个候选尝试解析
+    last_err = None
+    for cand in candidates:
+        cand = cand.strip()
+        if not cand:
+            continue
+        # 3a. 直接解析
+        try:
+            return json.loads(cand)
+        except ValueError as e:
+            last_err = e
+        # 3b. 去掉尾逗号（对象/数组内）
+        fixed = re.sub(r",\s*([}\]])", r"\1", cand)
+        if fixed != cand:
+            try:
+                return json.loads(fixed)
+            except ValueError as e:
+                last_err = e
+        # 3c. 去掉注释（// 和 /* */）
+        no_comment = re.sub(r"//[^\n]*", "", cand)
+        no_comment = re.sub(r"/\*.*?\*/", "", no_comment, flags=re.S)
+        if no_comment != cand:
+            try:
+                return json.loads(no_comment)
+            except ValueError as e:
+                last_err = e
+                no_comment2 = re.sub(r",\s*([}\]])", r"\1", no_comment)
+                try:
+                    return json.loads(no_comment2)
+                except ValueError as e2:
+                    last_err = e2
+        # 3d. 补全被截断的 JSON（仅缺少结尾的闭合括号，字符串未被截断时有效）
+        completed = _try_complete_truncated_json(cand)
+        if completed is not None:
+            return completed
+
+    if last_err is not None:
+        raise AIClientError(f"拆解结果 JSON 解析失败：{last_err}")
+    raise AIClientError("模型未返回有效的 JSON 结构")
+
+
+def _extract_json_safe(content):
+    """拆解结果解析：失败时给出更明确的可操作提示。"""
     try:
-        return json.loads(text[start:end + 1])
-    except ValueError as e:
-        raise AIClientError(f"拆解结果 JSON 解析失败：{e}") from e
+        return _extract_json(content)
+    except AIClientError as e:
+        # 判断是否疑似 token 截断（内容以逗号/冒号/未闭合引号结尾）
+        tail = (content or "").rstrip()[-40:]
+        if re.search(r"[,\"\[\{：:，]$", tail) or "Unterminated" in str(e):
+            raise AIClientError(
+                "拆解结果不完整（可能因模型输出长度被截断）。建议："
+                "① 在配置里调大该模型的 max_tokens；"
+                "② 对较长原文采用分块拆解。原始错误：" + str(e))
+        raise
+
+
+def _try_complete_truncated_json(text):
+    """尝试补全因 max_tokens 截断而缺少结尾括号的 JSON。
+
+    仅在字符串值未被截断（最后一个非空白字符是逗号/冒号/括号等）时，
+    按括号配对补齐缺失的 ] 和 } 后重新解析。无法安全补全时返回 None。
+    """
+    text = (text or "").rstrip()
+    if not text:
+        return None
+    # 统计 {} 和 [] 的未闭合深度（跳过字符串内字符）
+    obj_depth = 0   # {
+    arr_depth = 0   # [
+    in_str = False
+    esc = False
+    for ch in text:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        else:
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                obj_depth += 1
+            elif ch == "}":
+                obj_depth -= 1
+            elif ch == "[":
+                arr_depth += 1
+            elif ch == "]":
+                arr_depth -= 1
+    if in_str:
+        return None  # 字符串被截断，无法安全补全
+    if obj_depth <= 0 and arr_depth <= 0:
+        return None  # 括号已平衡，无需补全（说明是其他错误）
+    # 去掉末尾可能残留的逗号（截断通常停在逗号后），再补上缺失的闭合括号
+    base = text.rstrip()
+    base = re.sub(r",\s*$", "", base)
+    completed = base + ("]" * max(arr_depth, 0)) + ("}" * max(obj_depth, 0))
+    try:
+        return json.loads(completed)
+    except ValueError:
+        return None
 
 
 def _load_profile(novel):
@@ -1090,18 +1217,22 @@ def analyze_source_profile(context, novel, on_progress=None):
     source = (novel.get("source_text") or "").strip()
     if not source:
         raise AIClientError("尚未导入原文，无法拆解")
-    # 拆解输出 JSON 较大，预留输出余量
-    max_tokens = max(int(mcfg.get("max_tokens") or 8192), 8192)
+    # 拆解输出 JSON 较大（人物+世界观+主线+摘要），预留充足输出余量
+    max_tokens = max(int(mcfg.get("max_tokens") or 16000), 16000)
     limit = _context_limit(context, mcfg, max_tokens)
     # 每块原文上限（字符）：留出提示词 + 输出 token 的余量；未配置上下文时用保守默认
     block_chars = max(limit - 3000, 6000) if limit else 50000
 
     if len(source) <= block_chars:
+        if on_progress:
+            on_progress(0, 1, "正在通读全文，提取故事档案…")
         prompt = get_prompt(context, "analyze_source").format(source=source)
         content, _ = chat_text(
             provider, model, _messages(context, prompt),
             temperature=0.3, max_tokens=max_tokens, name="原著结构化拆解")
-        return _extract_json(content)
+        if on_progress:
+            on_progress(1, 1, "拆解完成，正在整理结果…")
+        return _extract_json_safe(content)
 
     # 超长：分块拆解 + 合并
     blocks = _split_source_blocks(source, block_chars)
@@ -1114,7 +1245,7 @@ def analyze_source_profile(context, novel, on_progress=None):
         content, _ = chat_text(
             provider, model, _messages(context, prompt),
             temperature=0.3, max_tokens=max_tokens, name=f"原著分块拆解 {i}/{total}")
-        partials.append(_extract_json(content))
+        partials.append(_extract_json_safe(content))
     if on_progress:
         on_progress(total, total, "正在合并各块档案…")
     return _merge_profiles(partials)

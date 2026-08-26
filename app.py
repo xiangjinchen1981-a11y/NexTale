@@ -563,8 +563,33 @@ def import_worldbook(body: dict):
 
 # ================= 角色 =================
 @app.get("/api/characters")
-def get_characters():
-    return {"characters": storage.list_characters()}
+def get_characters(novel_id: str = "", limit: int = 20):
+    """按需返回角色。
+
+    - 传 novel_id：只返回该小说关联的角色（按 created_at 倒序）
+    - 不传 novel_id：返回最新的 limit 个角色（默认 20）
+    """
+    all_chars = storage.list_characters()  # 已按 created_at 倒序
+    if novel_id:
+        novel = storage.get_novel(novel_id)
+        ids = set((novel or {}).get("character_ids") or [])
+        characters = [c for c in all_chars if c.get("id") in ids]
+    else:
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            limit = 20
+        characters = all_chars[:limit]
+    return {"characters": characters}
+
+
+@app.get("/api/characters/novels")
+def get_character_novels():
+    """返回小说列表（供角色库筛选下拉使用）。"""
+    novels = storage.list_novels()
+    novel_map = [{"id": n.get("id"), "title": n.get("title", ""),
+                  "character_ids": n.get("character_ids", [])} for n in novels]
+    return {"novels": novel_map}
 
 
 @app.post("/api/characters")
@@ -578,6 +603,7 @@ def create_character(body: dict):
         "background": body.get("background", ""),
         "notes": body.get("notes", ""),
         "photo_path": "",
+        "created_at": time.time(),
     }
     characters.append(c)
     storage.save_characters(characters)
@@ -601,6 +627,13 @@ def update_character(cid: str, body: dict):
 def delete_character(cid: str):
     chars = [c for c in storage.list_characters() if c.get("id") != cid]
     storage.save_characters(chars)
+    # 同步清理所有小说中对该角色的引用（避免残留失效 id）
+    for n in storage.list_novels():
+        ids = n.get("character_ids") or []
+        if cid in ids:
+            def mut(m):
+                m["character_ids"] = [x for x in (m.get("character_ids") or []) if x != cid]
+            storage.update_novel(n["id"], mut)
     return {"characters": chars}
 
 
@@ -1715,10 +1748,11 @@ async def analyze_source(nid: str):
 
     q: queue.Queue = queue.Queue(maxsize=16)
     loop = asyncio.get_running_loop()
-    stream_error: dict = {}
+    heartbeat_stop = threading.Event()
 
     def _producer():
         try:
+            q.put({"type": "progress", "step": 0, "total": 1, "message": "开始拆解原著…"})
             profile = generators.analyze_source_profile(
                 ctx, n,
                 on_progress=lambda step, total, msg: q.put(
@@ -1728,12 +1762,20 @@ async def analyze_source(nid: str):
             storage.update_novel(nid, mut)
             q.put({"type": "profile", "profile": profile})
         except Exception as e:  # noqa: BLE001
-            stream_error["err"] = e
             q.put({"type": "error", "message": str(_err(e).detail)})
         finally:
+            heartbeat_stop.set()
             q.put(None)
 
     threading.Thread(target=_producer, daemon=True).start()
+
+    def _heartbeat():
+        while not heartbeat_stop.is_set():
+            heartbeat_stop.wait(15)
+            if not heartbeat_stop.is_set():
+                q.put({"type": "progress", "step": -1, "total": -1, "message": "仍在拆解中，请稍候…"})
+
+    threading.Thread(target=_heartbeat, daemon=True).start()
 
     async def gen():
         try:
@@ -1769,9 +1811,12 @@ async def analyze_source_text(body: dict):
 
     q: queue.Queue = queue.Queue(maxsize=16)
     loop = asyncio.get_running_loop()
+    heartbeat_stop = threading.Event()
 
     def _producer():
         try:
+            # 立即发一条初始进度，让连接有数据
+            q.put({"type": "progress", "step": 0, "total": 1, "message": "开始拆解原著…"})
             profile = generators.analyze_source_profile(
                 ctx, n,
                 on_progress=lambda step, total, msg: q.put(
@@ -1780,9 +1825,19 @@ async def analyze_source_text(body: dict):
         except Exception as e:  # noqa: BLE001
             q.put({"type": "error", "message": str(_err(e).detail)})
         finally:
+            heartbeat_stop.set()
             q.put(None)
 
     threading.Thread(target=_producer, daemon=True).start()
+
+    def _heartbeat():
+        """定期发心跳，避免 LLM 长调用期间 SSE 静默被中断。"""
+        while not heartbeat_stop.is_set():
+            heartbeat_stop.wait(15)
+            if not heartbeat_stop.is_set():
+                q.put({"type": "progress", "step": -1, "total": -1, "message": "仍在拆解中，请稍候…"})
+
+    threading.Thread(target=_heartbeat, daemon=True).start()
 
     async def gen():
         try:
