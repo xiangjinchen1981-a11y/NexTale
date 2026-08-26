@@ -2,7 +2,7 @@
 
 > [简体中文](README.md) | [繁體中文](README.zh-TW.md) | [English](README.en.md) | [日本語](README.ja.md)
 
-An AI novel-writing tool built with Python + Web UI. Supports multiple writing modes (Outline / Improvised / Conversational), multiple AI provider integrations, character photo analysis, chapter polishing & expansion, finish/reopen management, trash bin, and a complete novel-writing workflow.
+An AI novel-writing tool built with Python + Web UI. Supports multiple writing modes (Outline / Improvised / Conversational), multiple AI provider integrations, character photo cropping & AI analysis, worldbooks & genre library, prompt configuration, chapter polishing & expansion, chapter version history, multi-format export, finish/reopen management, trash bin, and a complete novel-writing workflow.
 
 ## Features
 
@@ -17,8 +17,8 @@ An AI novel-writing tool built with Python + Web UI. Supports multiple writing m
 ### Core Capabilities
 
 1. **Multi-provider integration**: Supports all OpenAI-compatible APIs (OpenAI / DeepSeek / Zhipu GLM / Kimi / Qwen / SiliconFlow, etc.). Text generation and vision analysis can use different providers. Each provider supports its own proxy mode (direct / system proxy / custom proxy).
-2. **Character photo AI analysis**: Upload a photo and use a vision model to automatically analyze appearance and personality, generating a character card ready for your novel. Appearance / personality / background / notes can all be manually edited before saving.
-3. **Character relationships**: Multiple characters with relationship types and descriptions between them.
+2. **Character photo cropping & AI analysis**: Crop the photo in the browser with a selection box (pure frontend canvas, no third-party library). AI analysis is now triggered manually via an "AI Analysis" button that uses a vision model to analyze appearance and personality, generating a character card ready for your novel. Appearance / personality / background / notes can all be manually edited before saving.
+3. **Character library & relationships**: The character library is a dedicated top-level tab (list / add / detail), letting you maintain characters centrally and reuse them when creating novels. Supports multiple characters with relationship types and descriptions between them.
 4. **Writing style & reference text**: Paste reference novel excerpts to automatically extract their style, or describe the style manually. Supports a global pre-prompt.
 5. **Chapter polish & expansion**: While editing a chapter, select any text fragment to polish or expand it, with the result streamed back and replaced in place.
 6. **Outline editing**: After the outline is generated, you can freely edit chapter titles and summaries.
@@ -27,6 +27,11 @@ An AI novel-writing tool built with Python + Web UI. Supports multiple writing m
 9. **Trash bin**: Deleted novels go to the trash bin first, and can be restored or permanently deleted.
 10. **List management**: The novel list supports pagination, filtering by writing mode (Improv / Outline / Conversational), sorting by time / title, and filtering by model / status.
 11. **Request logs**: Every AI request is logged and can be queried from the UI.
+12. **Worldbook**: Create your own worldbooks or import SillyTavern-format ones. Entries support constant injection and keyword-based dynamic triggering (trigger words / selective / probability), automatically matched and injected into context during generation.
+13. **Genre library**: Save frequently used genres as templates (style, reference text, description), import them in bulk, and apply them with one click when creating a novel.
+14. **Prompt configuration**: All AI prompts (analysis / outline / chapter / polish / expand / conversation) are centrally managed and can be customized in the UI and persisted as overrides.
+15. **Chapter version history**: Chapters are automatically snapshotted before editing or AI generation. You can view the history and revert to an older version with one click.
+16. **Multi-format export**: Finished novels can be exported in Markdown / TXT / EPUB.
 
 ### Conversational Mode Details
 
@@ -35,6 +40,18 @@ An AI novel-writing tool built with Python + Web UI. Supports multiple writing m
 - After any AI message you can "Generate chapter": it merges previous AI output directly into a formal chapter (the prose is not regenerated — only the summary is extracted).
 - Conversations that have been merged into chapters are automatically removed from the chat area; subsequent merges no longer include already-merged content.
 - Generated chapters can be viewed, edited, and deleted.
+
+### Worldbooks & Dynamic Triggering
+
+Worldbooks store setting entries such as worldbuilding details, character backstories, and proper nouns. Each entry can be configured with:
+
+- **Constant injection**: `constant` entries are unconditionally added to every generation's context.
+- **Dynamic triggering**: non-constant entries use SillyTavern-style keyword matching — injected when a trigger word (`key`) appears in the current text/synopsis; `selective` entries require both primary and secondary keys to match; `probability` controls the chance of injection after a match.
+- **SillyTavern import**: supports importing SillyTavern worldbook JSON (entries as either an object or an array), auto-normalizing trigger words, positions, probabilities, and other fields.
+
+### Worldbuilding Source Protection
+
+If you manually fill in the "Worldbuilding" field, the AI will not overwrite it when generating the outline; it is only auto-generated by the AI when left blank.
 
 ## Installation & Running
 
@@ -84,11 +101,15 @@ python3 -m venv .venv
 2. Click **"🔌 Connect"** on the provider card to fetch its model list.
 3. Click **"＋ Add Model"**: choose a model name (from the dropdown after connecting, or type manually), choose a type (Text / Vision), optionally set temperature and max_tokens (leave empty for global defaults), then save.
 4. Click **"●Text" / "●Vision"** on a model entry to mark which model to use for text generation / vision analysis (only one each).
-5. **"Novel Writing" → "＋ New Novel"**, then follow the wizard:
-   - ① Basic info: title, genre, writing mode (Outline / Improvised / Conversational), chapter count, words per chapter, writing style, reference text, pre-prompt.
-   - ② Characters: upload a photo for AI analysis of appearance/personality (or fill manually), set up relationships.
+5. Optional (advanced):
+   - **"Genre Library"**: pre-save genre templates (style / reference text / description) and apply them with one click when creating a novel.
+   - **"Worldbook"**: create or import SillyTavern worldbooks for worldbuilding details and proper-noun settings.
+   - **"Prompt Config"**: customize the various AI prompts to override the defaults.
+6. **"Novel Writing" → "＋ New Novel"**, then follow the wizard:
+   - ① Basic info: title, genre (selectable from the genre library), writing mode (Outline / Improvised / Conversational), chapter count, words per chapter, writing style, reference text, pre-prompt.
+   - ② Characters: pick from the character library or upload a photo (crop, then manually trigger AI analysis) for appearance/personality, and set up relationships.
    - ③ Enter the chosen mode and start writing: generate outline → write chapter by chapter / improvise / converse.
-6. When done, you can "Finish" the novel, export Markdown, or read the full text.
+7. When done, you can "Finish" the novel and export it as Markdown / TXT / EPUB or read the full text.
 
 ## Common Provider base_url
 
@@ -113,24 +134,27 @@ If `http_proxy` / `all_proxy` environment variables are set, the openai SDK read
 novel-generator/
 ├── app.py            # FastAPI backend entry + all APIs
 ├── ai_client.py      # OpenAI-compatible API wrapper (proxy control, streaming)
-├── generators.py     # Generation engine (style/outline/chapter/summary/polish/expand/conversation)
-├── storage.py        # SQLite persistence
+├── generators.py     # Generation engine (style/outline/chapter/summary/polish/expand/conversation/worldbook matching)
+├── prompts.py        # Centralized prompt templates (overridable via the "Prompt Config" page)
+├── storage.py        # SQLite persistence (incl. chapter version history)
 ├── install.sh        # One-click install script
+├── start.sh          # Startup script
 ├── run.sh            # Startup script (generated by install.sh)
 ├── requirements.txt  # Python dependencies
 ├── data/novel.db     # SQLite database file (auto-created)
 ├── uploads/          # Uploaded character photos
-├── output/           # Exported Markdown
+├── output/           # Exported Markdown/TXT/EPUB
 └── static/           # Frontend (HTML/CSS/JS)
 ```
 
 ## How Generation Works
 
-1. **Outline generation**: analyze reference text style → aggregate characters/relationships/style → generate synopsis + worldbuilding + chapter outline.
+1. **Outline generation**: analyze reference text style → aggregate characters/relationships/style → generate synopsis + worldbuilding + chapter outline; if you manually filled in the worldbuilding, it is preserved and not overwritten.
 2. **Chapter-by-chapter generation**: each chapter is injected with the full setting + outline + progress summary to ensure coherence; the progress summary is updated after each chapter and condensed automatically when too long.
 3. **Conversational mode**: each turn injects the full setting + progress summary + conversation history into the prompt; the AI outputs a prose fragment of at most 500 characters.
-4. **Word count control**: constrained by both the prompt and max_tokens (the `token_ratio` coefficient is adjustable).
-5. **Context length**: you can set the model's context length, and the tool automatically controls the amount of content sent in each generation.
+4. **Worldbook injection**: during outline/chapter/conversation generation, constant entries are injected unconditionally, while non-constant entries are matched by trigger words and injected dynamically.
+5. **Word count control**: constrained by both the prompt and max_tokens (the `token_ratio` coefficient is adjustable).
+6. **Context length**: you can set the model's context length, and the tool automatically controls the amount of content sent in each generation.
 
 ## License
 
