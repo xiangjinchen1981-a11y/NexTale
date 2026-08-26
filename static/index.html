@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>织叙-NexTale</title>
-  <link rel="stylesheet" href="style.css?v=20260826j">
+  <link rel="stylesheet" href="style.css?v=20260826m">
 </head>
 <body>
   <header class="topbar">
@@ -13,9 +13,9 @@
       <button class="tab" data-tab="genres">题材库</button>
       <button class="tab" data-tab="worldbooks">世界书</button>
       <button class="tab" data-tab="characters">角色</button>
-      <button class="tab tab-primary" data-tab="novels">✍️ 小说创作</button>
       <button class="tab" data-tab="library">📚 小说阅读</button>
       <button class="tab" data-tab="logs">日志</button>
+      <button class="tab tab-primary" data-tab="novels">✍️ 小说创作</button>
     </nav>
     <span class="spacer"></span>
     <button class="btn" id="btn-providers" onclick="nav('#/providers')">配置</button>
@@ -421,6 +421,8 @@
               <option value="outline">大纲式（先生成大纲，再逐章写）</option>
               <option value="improv">即兴交互式（边写边定，无需大纲）</option>
               <option value="dialog">对话模式（像聊天一样推进剧情）</option>
+              <option value="rewrite">改写（导入已有小说，按要求改写）</option>
+              <option value="continue">续写（导入已有小说，续写后续）</option>
             </select>
           </label>
           <label>章节数
@@ -428,6 +430,21 @@
           </label>
           <label>每章字数
             <input id="n-words" type="number" min="200" step="100" value="2000">
+          </label>
+        </div>
+        <div id="source-import-box" style="display:none">
+          <h4>导入已有小说原文</h4>
+          <p class="hint">粘贴已有小说的全文，作为「改写」的素材或「续写」的前情。导入后系统会自动按章节（或每章字数）切分。</p>
+          <label>原文内容
+            <textarea id="n-source" rows="10" placeholder="粘贴已有小说的全文…"></textarea>
+          </label>
+          <div class="row" style="margin-top:6px">
+            <button type="button" class="btn" onclick="pickSourceFile()">📄 从文件导入（.txt / .md）</button>
+            <input type="file" id="n-source-file" accept=".txt,.md,.text,text/plain,text/markdown" onchange="onSourceFilePicked(this)" style="display:none">
+            <span class="meta" id="n-source-info"></span>
+          </div>
+          <label>改写要求 / 续写要求
+            <textarea id="n-task-instruction" rows="3" placeholder="改写示例：改写成第一人称、古文风、精简到原来的60%…；续写示例：让主角踏上复仇之路、开启全新篇章…"></textarea>
           </label>
         </div>
         <label>故事背景（时代/地点/大环境设定）
@@ -521,6 +538,55 @@
       </div>
     </section>
 
+    <!-- ============ 改写模式（视图） ============ -->
+    <section id="view-rewrite" class="view">
+      <div class="page-head">
+        <a class="back-link" href="#/novels">← 返回小说列表</a>
+        <a class="back-link" id="rewrite-edit-link" href="#/novels/edit">← 编辑设定</a>
+        <h2 id="rewrite-title">改写创作</h2>
+      </div>
+      <div class="card rewrite-input-card">
+        <div class="row">
+          <span class="title">改写要求</span>
+          <span class="meta" id="rewrite-chapter-hint"></span>
+        </div>
+        <p class="hint">设定整体的改写目标（人称、文风、篇幅、背景等），对下方每个章节生效；也可在每章单独点「改写」时覆盖。</p>
+        <textarea id="rewrite-instruction" rows="2" placeholder="例如：改写成第一人称、古文风、精简到原来的60%…"></textarea>
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="rewrite-save-instr" onclick="saveRewriteInstruction()">保存要求</button>
+          <button class="btn primary" id="rewrite-all-btn" onclick="rewriteAll()">改写全部章节</button>
+          <button class="btn" onclick="resplitSource()">按原文重新切分</button>
+          <span class="spacer"></span>
+          <button class="btn" onclick="nav('#/novels/' + currentNovelId + '/read')" id="rewrite-read-btn" style="display:none">阅读全文</button>
+        </div>
+      </div>
+      <div id="rewrite-body"></div>
+    </section>
+
+    <!-- ============ 续写模式（视图） ============ -->
+    <section id="view-continue" class="view">
+      <div class="page-head">
+        <a class="back-link" href="#/novels">← 返回小说列表</a>
+        <a class="back-link" id="continue-edit-link" href="#/novels/edit">← 编辑设定</a>
+        <h2 id="continue-title">续写创作</h2>
+      </div>
+      <div class="card continue-input-card">
+        <div class="row">
+          <span class="title">本章续写要求</span>
+          <span class="meta" id="continue-chapter-hint">接下来写第 1 章</span>
+        </div>
+        <p class="hint">以导入的原文为前情，告诉 AI 这一章要续写什么情节，AI 会承接原文结尾继续创作。</p>
+        <textarea id="continue-instruction" rows="3" placeholder="例如：主角在多年后重返故地，发现当年的真相另有隐情……"></textarea>
+        <div class="row" style="margin-top:10px">
+          <button class="btn primary" id="continue-gen-btn" onclick="generateContinueChapter()">续写下一章</button>
+          <span class="spacer"></span>
+          <button class="btn" onclick="nav('#/novels/' + currentNovelId + '/read')" id="continue-read-btn" style="display:none">阅读全文</button>
+        </div>
+      </div>
+      <div class="card source-card" id="continue-source-box"></div>
+      <div id="continue-body"></div>
+    </section>
+
     <!-- ============ 章节详情/生成页（视图） ============ -->
     <section id="view-chapter" class="view">
       <div class="page-head">
@@ -582,6 +648,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260826j"></script>
+  <script src="app.js?v=20260826k"></script>
 </body>
 </html>

@@ -195,7 +195,7 @@ function maskKey(k) {
 
 // ============ 视图 / 路由 ============
 // 视图列表：login（登录）、providers（配置）、genres（题材库）、worldbooks（世界书）、novels（列表）、trash（垃圾箱）、editor（创作）、generate（生成）、chapter（章节详情）、reader（阅读）、improv（即兴写作）、dialog（对话模式）、logs（请求日志）
-const VIEWS = ['login', 'providers', 'genres', 'worldbooks', 'characters', 'character-new', 'character-detail', 'novels', 'library', 'trash', 'editor', 'generate', 'chapter', 'reader', 'improv', 'dialog', 'logs'];
+const VIEWS = ['login', 'providers', 'genres', 'worldbooks', 'characters', 'character-new', 'character-detail', 'novels', 'library', 'trash', 'editor', 'generate', 'chapter', 'reader', 'improv', 'dialog', 'rewrite', 'continue', 'logs'];
 
 // 当前小说 id（用于创作/生成页定位）
 let currentNovelId = null;
@@ -362,6 +362,20 @@ async function router() {
     // 对话模式：#/novels/:id/dialog
     showView('dialog');
     await openDialogPage(id);
+    return;
+  }
+
+  if (sub === 'rewrite') {
+    // 改写模式：#/novels/:id/rewrite
+    showView('rewrite');
+    await openRewritePage(id);
+    return;
+  }
+
+  if (sub === 'continue') {
+    // 续写模式：#/novels/:id/continue
+    showView('continue');
+    await openContinuePage(id);
     return;
   }
 
@@ -1365,13 +1379,15 @@ const NOVEL_PAGE_SIZE = 5;
 
 // 创作模式显示名
 function modeLabel(m) {
-  return { 'outline': '大纲', 'improv': '即兴', 'dialog': '对话' }[m] || '大纲';
+  return { 'outline': '大纲', 'improv': '即兴', 'dialog': '对话', 'rewrite': '改写', 'continue': '续写' }[m] || '大纲';
 }
 
 // 渲染一个小说卡片（供列表与垃圾箱复用）
 function novelCardHTML(n) {
   const isImprov = n.mode === 'improv';
   const isDialog = n.mode === 'dialog';
+  const isRewrite = n.mode === 'rewrite';
+  const isContinue = n.mode === 'continue';
   const hasOutline = n.chapters && n.chapters.length;
   const genCount = (n.chapters || []).filter(c => c.content).length;
   const isFinished = n.status === 'finished';
@@ -1381,6 +1397,10 @@ function novelCardHTML(n) {
     primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/dialog')">进入对话</button>`;
   } else if (isImprov) {
     primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/improv')">进入写作（${genCount} 章）</button>`;
+  } else if (isRewrite) {
+    primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/rewrite')">进入改写（${hasOutline ? n.chapters.length : 0} 段）</button>`;
+  } else if (isContinue) {
+    primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/continue')">进入续写（${genCount} 章）</button>`;
   } else if (hasOutline) {
     primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/generate')">进入生成（${genCount}/${n.chapter_count}）</button>`;
   } else {
@@ -1663,7 +1683,8 @@ function newNovel() {
   state.novel = null;
   state.relations = [];
   currentNovelId = null;
-  ['n-title', 'n-genre', 'n-style', 'n-reference', 'n-background', 'n-worldbuilding'].forEach(i => $(i).value = '');
+  ['n-title', 'n-genre', 'n-style', 'n-reference', 'n-background', 'n-worldbuilding', 'n-source', 'n-task-instruction'].forEach(i => $(i).value = '');
+  const srcInfo = $('n-source-info'); if (srcInfo) srcInfo.textContent = '';
   $('n-chapters').value = 10;
   $('n-words').value = 2000;
   $('n-mode').value = 'outline';
@@ -1677,13 +1698,16 @@ function newNovel() {
   window.scrollTo({ top: 0 });
 }
 
-// 创作模式切换：即兴交互式、对话模式不需要预设章节数
+// 创作模式切换：即兴交互式、对话、改写、续写模式不需要预设章节数
 function onModeChange() {
   const mode = $('n-mode') ? $('n-mode').value : 'outline';
   const chaptersLabel = $('n-chapters').closest('label');
   if (chaptersLabel) {
-    chaptersLabel.style.display = (mode === 'improv' || mode === 'dialog') ? 'none' : '';
+    const hide = mode === 'improv' || mode === 'dialog' || mode === 'rewrite' || mode === 'continue';
+    chaptersLabel.style.display = hide ? 'none' : '';
   }
+  const srcBox = $('source-import-box');
+  if (srcBox) srcBox.style.display = (mode === 'rewrite' || mode === 'continue') ? 'block' : 'none';
 }
 
 function goStep(n) {
@@ -1721,6 +1745,8 @@ async function saveNovelBasics() {
     words_per_chapter: parseInt($('n-words').value) || 2000,
     text_model_id: $('n-model').value || '',
     mode: $('n-mode').value || 'outline',
+    source_text: $('n-source').value.trim(),
+    task_instruction: $('n-task-instruction').value.trim(),
   };
   try {
     if (state.novel) {
@@ -1753,11 +1779,15 @@ async function saveNovelChars() {
     state.novel = d.novel;
     toast('角色设定已保存', 'ok');
     loadNovels();
-    // 根据创作模式跳转：即兴 → 即兴写作页；对话 → 对话页；大纲 → 章节生成页
+    // 根据创作模式跳转：即兴 → 即兴写作页；对话 → 对话页；改写 → 改写页；续写 → 续写页；大纲 → 章节生成页
     if (state.novel.mode === 'improv') {
       nav('#/novels/' + state.novel.id + '/improv');
     } else if (state.novel.mode === 'dialog') {
       nav('#/novels/' + state.novel.id + '/dialog');
+    } else if (state.novel.mode === 'rewrite') {
+      nav('#/novels/' + state.novel.id + '/rewrite');
+    } else if (state.novel.mode === 'continue') {
+      nav('#/novels/' + state.novel.id + '/continue');
     } else {
       nav('#/novels/' + state.novel.id + '/generate');
     }
@@ -1776,6 +1806,8 @@ async function openEditorPage(id) {
     $('n-reference').value = state.novel.reference_text || '';
     $('n-background').value = state.novel.background || '';
     $('n-worldbuilding').value = state.novel.worldbuilding || '';
+    $('n-source').value = state.novel.source_text || '';
+    $('n-task-instruction').value = state.novel.task_instruction || '';
     $('n-chapters').value = state.novel.chapter_count || 10;
     $('n-words').value = state.novel.words_per_chapter || 2000;
     renderNovelModelSelect();
@@ -1834,9 +1866,11 @@ async function openChapterPage(id, index) {
     }
     const backLink = $('chapter-back-link');
     if (backLink) {
-      // 根据创作模式决定返回目标：即兴 → 即兴写作页，对话 → 对话页，大纲 → 生成页
+      // 根据创作模式决定返回目标：即兴 → 即兴写作页，对话 → 对话页，改写 → 改写页，续写 → 续写页，大纲 → 生成页
       const backTarget = state.novel.mode === 'improv' ? '/improv'
-        : state.novel.mode === 'dialog' ? '/dialog' : '/generate';
+        : state.novel.mode === 'dialog' ? '/dialog'
+        : state.novel.mode === 'rewrite' ? '/rewrite'
+        : state.novel.mode === 'continue' ? '/continue' : '/generate';
       backLink.setAttribute('href', '#/novels/' + id + backTarget);
     }
     chapterEditing = null;  // 切换到章节页时重置编辑状态
@@ -3774,6 +3808,287 @@ async function saveOutline() {
     renderWorkspace();
     toast('大纲已保存', 'ok');
   } catch (e) { toast(e.message, 'err'); }
+}
+
+// ============ 改写 / 续写模式（导入已有小说） ============
+let rewriteGenerating = false;   // 改写中（防止重复提交）
+let continueGenerating = false;  // 续写中
+
+// 触发文件选择导入原文
+function pickSourceFile() {
+  const f = $('n-source-file');
+  if (f) f.click();
+}
+
+// 读取选中文件内容到原文输入框
+function onSourceFilePicked(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const text = String(reader.result || '');
+    const ta = $('n-source');
+    if (ta) ta.value = text;
+    const info = $('n-source-info');
+    if (info) info.textContent = `已导入：${file.name}（${text.length} 字）`;
+    toast('原文已导入', 'ok');
+  };
+  reader.onerror = () => toast('文件读取失败', 'err');
+  reader.readAsText(file, 'utf-8');
+  input.value = '';  // 允许重复选择同一文件
+}
+
+// ===== 改写模式 =====
+async function openRewritePage(id) {
+  try {
+    const d = await api('/api/novels/' + id);
+    state.novel = d.novel;
+    currentNovelId = id;
+    $('rewrite-title').textContent = '《' + (state.novel.title || '未命名') + '》 改写创作';
+    const editLink = $('rewrite-edit-link');
+    if (editLink) editLink.setAttribute('href', '#/novels/' + id + '/edit');
+    $('rewrite-instruction').value = state.novel.task_instruction || '';
+    renderRewrite();
+    window.scrollTo({ top: 0 });
+  } catch (e) {
+    toast(e.message, 'err');
+    nav('#/novels');
+  }
+}
+
+function renderRewrite() {
+  const n = state.novel;
+  const chapters = n.chapters || [];
+  const doneCount = chapters.filter(c => c.summary).length;
+  const hint = $('rewrite-chapter-hint');
+  if (hint) hint.textContent = chapters.length ? `共 ${chapters.length} 段 · 已改写 ${doneCount} 段` : '';
+  const readBtn = $('rewrite-read-btn');
+  if (readBtn) readBtn.style.display = doneCount ? '' : 'none';
+
+  const body = $('rewrite-body');
+  if (!chapters.length) {
+    body.innerHTML = '<div class="card meta">尚未导入原文。点「编辑设定」，在基本信息中粘贴或从文件导入已有小说原文。</div>';
+    return;
+  }
+  body.innerHTML = chapters.map(c => {
+    const rewritten = !!c.summary;
+    return `
+    <div class="card rewrite-chapter-card" id="rewrite-card-${c.index}">
+      <div class="row">
+        <span class="title">${esc(c.title || ('第' + c.index + '段'))}</span>
+        ${rewritten ? '<span class="badge">已改写</span>' : '<span class="meta">未改写</span>'}
+        <span class="meta">${c.word_count ? '约 ' + c.word_count + ' 字' : ''}</span>
+        <span class="spacer"></span>
+        <button class="btn" onclick="nav('#/novels/${n.id}/chapter/${c.index}')">查看/编辑</button>
+        <button class="btn primary" id="rewrite-btn-${c.index}" onclick="rewriteChapter(${c.index})">${rewritten ? '重新改写' : '改写本章'}</button>
+      </div>
+      <div class="chapter-content" style="max-height:240px;overflow:auto">${esc(c.content || '')}</div>
+    </div>`;
+  }).join('');
+}
+
+async function saveRewriteInstruction() {
+  const instr = $('rewrite-instruction').value.trim();
+  try {
+    const d = await api('/api/novels/' + state.novel.id, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_instruction: instr }),
+    });
+    state.novel = d.novel;
+    toast('改写要求已保存', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function rewriteChapter(index) {
+  if (rewriteGenerating) return;
+  rewriteGenerating = true;
+  const card = $('rewrite-card-' + index);
+  const btn = $('rewrite-btn-' + index);
+  if (btn) { btn.disabled = true; btn.textContent = '改写中…'; }
+
+  let out = null, badge = null;
+  if (card) {
+    card.insertAdjacentHTML('beforeend',
+      `<div class="gen-panel"><span class="badge gen-badge" id="rewrite-badge-${index}">生成中…</span><div class="gen-output" id="rewrite-out-${index}"></div></div>`);
+    out = $('rewrite-out-' + index);
+    badge = $('rewrite-badge-' + index);
+  }
+
+  let full = '';
+  let received = false;
+  const waitTimer = setTimeout(() => { if (!received && badge) badge.textContent = '模型思考中…'; }, 9000);
+
+  try {
+    await streamApi(`/api/novels/${state.novel.id}/rewrite/stream`, (ev) => {
+      if (ev.type === 'delta') {
+        if (!received) { received = true; clearTimeout(waitTimer); if (badge) badge.textContent = '生成中…'; }
+        full += ev.content;
+        if (out) { out.textContent = full; out.scrollTop = out.scrollHeight; }
+      } else if (ev.type === 'chapter_done') {
+        if (badge) badge.textContent = '正文完成，生成摘要…';
+      } else if (ev.type === 'done') {
+        state.novel = ev.novel;
+      } else if (ev.type === 'error') {
+        throw new Error(ev.message);
+      }
+    }, { index });
+  } catch (e) {
+    toast(e.message, 'err');
+  } finally {
+    clearTimeout(waitTimer);
+    rewriteGenerating = false;
+  }
+
+  if (!received) toast('模型未返回内容，请重试', 'err');
+  else toast('本章改写完成', 'ok');
+  renderRewrite();
+}
+
+async function rewriteAll() {
+  const chapters = (state.novel.chapters || []).filter(c => !c.summary);
+  if (!chapters.length) { toast('所有章节均已改写', 'ok'); return; }
+  if (!confirm(`将依次改写 ${chapters.length} 个未改写章节，可能耗时较长，是否继续？`)) return;
+  for (const c of chapters) {
+    await rewriteChapter(c.index);
+  }
+  toast('全部改写完成', 'ok');
+}
+
+async function resplitSource() {
+  if (!confirm('按当前原文重新切分章节，将丢弃已有的改写结果，确定？')) return;
+  try {
+    const d = await api('/api/novels/' + state.novel.id + '/resplit', { method: 'POST' });
+    state.novel = d.novel;
+    renderRewrite();
+    toast('已按原文重新切分', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// ===== 续写模式 =====
+async function openContinuePage(id) {
+  try {
+    const d = await api('/api/novels/' + id);
+    state.novel = d.novel;
+    currentNovelId = id;
+    $('continue-title').textContent = '《' + (state.novel.title || '未命名') + '》 续写创作';
+    const editLink = $('continue-edit-link');
+    if (editLink) editLink.setAttribute('href', '#/novels/' + id + '/edit');
+    renderContinue();
+    window.scrollTo({ top: 0 });
+  } catch (e) {
+    toast(e.message, 'err');
+    nav('#/novels');
+  }
+}
+
+function renderContinue() {
+  const n = state.novel;
+  const chapters = (n.chapters || []).filter(c => c.content);
+  const source = n.source_text || '';
+
+  const hint = $('continue-chapter-hint');
+  if (hint) hint.textContent = chapters.length ? `已续写 ${chapters.length} 章，接下来写第 ${chapters.length + 1} 章` : '接下来写第 1 章';
+  const readBtn = $('continue-read-btn');
+  if (readBtn) readBtn.style.display = chapters.length ? '' : 'none';
+
+  const srcBox = $('continue-source-box');
+  if (srcBox) {
+    if (source) {
+      srcBox.style.display = 'block';
+      const tail = source.length > 600 ? '……' + source.slice(-600) : source;
+      srcBox.innerHTML = `<div class="row"><span class="title">📄 已导入原文（结尾摘录）</span><span class="spacer"></span><span class="meta">共 ${source.length} 字</span></div><div class="chapter-content" style="max-height:200px;overflow:auto">${esc(tail)}</div>`;
+    } else {
+      srcBox.style.display = 'none';
+    }
+  }
+
+  const body = $('continue-body');
+  if (!chapters.length) {
+    body.innerHTML = '<div class="card meta">还没有续写内容。在上方填写本章续写要求，点击「续写下一章」开始。</div>';
+    return;
+  }
+  body.innerHTML = chapters.map(c => `
+    <div class="card continue-chapter-card">
+      <div class="row">
+        <span class="title">${esc(c.title || ('第' + c.index + '章'))}</span>
+        <span class="meta">约 ${c.word_count || ''} 字</span>
+        <span class="spacer"></span>
+        <button class="btn" onclick="nav('#/novels/${n.id}/chapter/${c.index}')">查看/编辑正文</button>
+      </div>
+      ${c.instruction ? `<div class="improv-instruction-hint">📝 本章续写要求：${esc(c.instruction)}</div>` : ''}
+      <div class="chapter-content" style="max-height:300px;overflow:auto">${esc(c.content)}</div>
+    </div>`).join('');
+}
+
+async function generateContinueChapter() {
+  if (continueGenerating) return;
+  const instruction = $('continue-instruction').value.trim();
+  if (!instruction) return toast('请填写本章续写要求', 'err');
+  if (!(state.novel.source_text || '').trim()) return toast('尚未导入原文，请先到「编辑设定」导入', 'err');
+
+  continueGenerating = true;
+  const btn = $('continue-gen-btn');
+  btn.disabled = true;
+  btn.textContent = '生成中…';
+  $('continue-instruction').disabled = true;
+
+  const body = $('continue-body');
+  const panelId = 'continue-gen-' + Date.now();
+  body.insertAdjacentHTML('afterbegin', `
+    <div class="card gen-panel" id="${panelId}">
+      <div class="row">
+        <span class="title">新章节生成中</span>
+        <span class="badge gen-badge" id="${panelId}-badge">生成中…</span>
+        <span class="spacer"></span>
+        <span class="meta" id="${panelId}-words"></span>
+      </div>
+      <div class="gen-output" id="${panelId}-out"></div>
+    </div>`);
+  const out = $(panelId + '-out');
+  const badge = $(panelId + '-badge');
+  const wordsEl = $(panelId + '-words');
+
+  let full = '';
+  let received = false;
+  const waitTimer = setTimeout(() => { if (!received && badge) badge.textContent = '模型思考中…'; }, 9000);
+
+  try {
+    await streamApi(`/api/novels/${state.novel.id}/continue/stream`, (ev) => {
+      if (ev.type === 'delta') {
+        if (!received) { received = true; clearTimeout(waitTimer); if (badge) badge.textContent = '生成中…'; }
+        full += ev.content;
+        if (out) { out.textContent = full; out.scrollTop = out.scrollHeight; }
+      } else if (ev.type === 'chapter_done') {
+        if (wordsEl) wordsEl.textContent = `约 ${ev.word_count || 0} 字`;
+        if (badge) badge.textContent = '正文完成，生成摘要…';
+      } else if (ev.type === 'done') {
+        state.novel = ev.novel;
+      } else if (ev.type === 'error') {
+        throw new Error(ev.message);
+      }
+    }, { instruction });
+  } catch (e) {
+    toast(e.message, 'err');
+    $(panelId).remove();
+    return;
+  } finally {
+    clearTimeout(waitTimer);
+    continueGenerating = false;
+    btn.disabled = false;
+    btn.textContent = '续写下一章';
+    $('continue-instruction').disabled = false;
+  }
+
+  if (!received) {
+    toast('模型未返回内容，请重试', 'err');
+    $(panelId).remove();
+    return;
+  }
+
+  $(panelId).remove();
+  $('continue-instruction').value = '';
+  renderContinue();
+  toast('本章续写完成', 'ok');
 }
 
 // ============ 初始化 ============
