@@ -262,7 +262,6 @@ def connect_provider(request: Request, c: ConnectIn):
 
 
 def _provider_dict(p: ProviderIn) -> dict:
-    uid = request.state.user_id
     return {
         "name": p.name.strip() or p.base_url.strip(),
         "base_url": p.base_url.strip(),
@@ -327,7 +326,6 @@ def delete_provider(request: Request, pid: str):
 
 # ================= 模型（挂在服务商下） =================
 def _model_dict(m: ModelIn) -> dict:
-    uid = request.state.user_id
     return {
         "id": storage.new_id(),
         "name": m.name.strip(),
@@ -548,7 +546,6 @@ def import_genres(request: Request, body: dict):
 
 # ================= 世界书 =================
 def _normalize_worldbook_entry(e: dict) -> dict:
-    uid = request.state.user_id
     """把 SillyTavern 世界书条目规范化为内部结构。"""
     keys = e.get("key") or e.get("keys") or []
     if isinstance(keys, str):
@@ -585,7 +582,6 @@ def _normalize_worldbook_entry(e: dict) -> dict:
 
 
 def _parse_sillytavern_worldbook(data: dict) -> dict:
-    uid = request.state.user_id
     """解析 SillyTavern 世界书 JSON，返回 {name, description, entries}。
 
     兼容 entries 为对象（key 为 uid 字符串）或数组两种形式。
@@ -767,8 +763,9 @@ def delete_character(request: Request, cid: str):
 
 
 @app.post("/api/characters/{cid}/photo")
-async def upload_photo(cid: str, file: UploadFile = File(...)):
+async def upload_photo(request: Request, cid: str, file: UploadFile = File(...)):
     """上传角色照片（仅保存，不做 AI 分析）。AI 分析请调用 /api/analyze-character-photo。"""
+    uid = request.state.user_id
     data = await file.read()
     if not data:
         raise HTTPException(400, "文件为空")
@@ -793,8 +790,9 @@ async def upload_photo(cid: str, file: UploadFile = File(...)):
 
 
 @app.post("/api/analyze-character-photo")
-async def analyze_character_photo(file: UploadFile = File(...)):
+async def analyze_character_photo(request: Request, file: UploadFile = File(...)):
     """分析人物照片（外貌/穿着/性格），返回 {appearance, personality}，不落库、不保存照片，由前端确认后自行保存。"""
+    uid = request.state.user_id
     data = await file.read()
     if not data:
         raise HTTPException(400, "文件为空")
@@ -811,7 +809,6 @@ async def analyze_character_photo(file: UploadFile = File(...)):
 
 # ================= 小说 =================
 def _ensure_not_finished(n: dict):
-    uid = request.state.user_id
     """完结的小说不可再修改，任何写操作前调用此守卫。"""
     if n.get("status") == "finished":
         raise HTTPException(409, "该小说已完结，如需修改请先「重开」")
@@ -1173,8 +1170,9 @@ def generate_one_chapter(request: Request, nid: str, index: int):
 
 
 @app.post("/api/novels/{nid}/chapter/{index}/stream")
-async def stream_one_chapter(nid: str, index: int):
+async def stream_one_chapter(request: Request, nid: str, index: int):
     """流式生成单章（SSE）：实时推送正文增量，边生成边显示。"""
+    uid = request.state.user_id
     n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
@@ -1276,12 +1274,13 @@ async def stream_one_chapter(nid: str, index: int):
 
 
 @app.post("/api/novels/{nid}/improv/stream")
-async def improv_stream(nid: str, body: dict):
+async def improv_stream(request: Request, nid: str, body: dict):
     """即兴交互式：根据写作指引流式生成新章节。body: {instruction, title?, regenerate_index?}
 
     regenerate_index 存在时：重新生成该章（替换正文与写作指引，保留标题），
     引用章节只允许取该章之前的内容，避免把原章节内容发给 AI。
     """
+    uid = request.state.user_id
     n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
@@ -1412,19 +1411,20 @@ async def improv_stream(nid: str, body: dict):
 
 
 @app.post("/api/novels/{nid}/chapter/{index}/polish")
-async def polish_fragment(nid: str, index: int, body: dict):
+async def polish_fragment(request: Request, nid: str, index: int, body: dict):
     """润色章节中的节选片段（SSE 流式）。body: {text}。"""
-    return _fragment_sse(nid, index, body, "polish")
+    uid = request.state.user_id
+    return _fragment_sse(nid, index, body, "polish", uid)
 
 
 @app.post("/api/novels/{nid}/chapter/{index}/expand")
-async def expand_fragment(nid: str, index: int, body: dict):
+async def expand_fragment(request: Request, nid: str, index: int, body: dict):
     """扩写章节中的节选片段（SSE 流式）。body: {text}。"""
-    return _fragment_sse(nid, index, body, "expand")
-
-
-def _fragment_sse(nid: str, index: int, body: dict, action: str):
     uid = request.state.user_id
+    return _fragment_sse(nid, index, body, "expand", uid)
+
+
+def _fragment_sse(nid: str, index: int, body: dict, action: str, uid: str):
     """润色/扩写片段的通用 SSE 处理。"""
     n = storage.get_novel(nid, uid)
     if not n:
@@ -1484,7 +1484,7 @@ def _fragment_sse(nid: str, index: int, body: dict, action: str):
 
 
 @app.post("/api/novels/{nid}/dialog/stream")
-async def dialog_stream(nid: str, body: dict):
+async def dialog_stream(request: Request, nid: str, body: dict):
     """对话模式：作者发言 → AI 流式返回一段约 word_limit 字的剧情片段（SSE）。
 
     body:
@@ -1496,6 +1496,7 @@ async def dialog_stream(nid: str, body: dict):
     重生成场景：前端把历史截断到被编辑消息之前，把编辑后的内容作为 text 传入，
     后端用新历史生成，并在保存时替换（而非追加）该历史之后的旧消息。
     """
+    uid = request.state.user_id
     n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
@@ -1611,7 +1612,7 @@ def update_dialog_message(request: Request, nid: str, body: dict):
 
 
 @app.post("/api/novels/{nid}/dialog/chapter")
-async def dialog_to_chapter(nid: str, body: dict):
+async def dialog_to_chapter(request: Request, nid: str, body: dict):
     """把某次对话（含该消息之前的全部 AI 输出）合并成正式章节并保存。
 
     正文不重新生成——直接把之前的 AI 输出内容按顺序合并；
@@ -1621,6 +1622,7 @@ async def dialog_to_chapter(nid: str, body: dict):
       up_to  结束索引（从 0 起，含该消息），取前 up_to+1 条消息中的 AI 内容。
       title  可选章节标题，缺省用「第N章」。
     """
+    uid = request.state.user_id
     n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
@@ -1733,8 +1735,9 @@ def revert_chapter(request: Request, nid: str, index: int, body: dict):
 # ================= 改写 / 续写模式（导入已有小说） =================
 
 @app.post("/api/novels/{nid}/rewrite/stream")
-async def rewrite_stream(nid: str, body: dict):
+async def rewrite_stream(request: Request, nid: str, body: dict):
     """改写模式：按任务要求流式改写某章原文。body: {index}。"""
+    uid = request.state.user_id
     n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
@@ -1807,8 +1810,9 @@ async def rewrite_stream(nid: str, body: dict):
 
 
 @app.post("/api/novels/{nid}/continue/stream")
-async def continue_stream(nid: str, body: dict):
+async def continue_stream(request: Request, nid: str, body: dict):
     """续写模式：以导入原文为前情流式生成下一章。body: {instruction}。"""
+    uid = request.state.user_id
     n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
@@ -1887,8 +1891,9 @@ async def continue_stream(nid: str, body: dict):
 
 
 @app.post("/api/novels/{nid}/analyze")
-async def analyze_source(nid: str):
+async def analyze_source(request: Request, nid: str):
     """原著结构化拆解（SSE）：后台调用 LLM 提取故事档案，完成后持久化并返回。"""
+    uid = request.state.user_id
     n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
@@ -1948,8 +1953,9 @@ async def analyze_source(nid: str):
 
 
 @app.post("/api/analyze-source")
-async def analyze_source_text(body: dict):
+async def analyze_source_text(request: Request, body: dict):
     """无状态原著结构化拆解（SSE）：接收原文文本，返回故事档案（不持久化）。"""
+    uid = request.state.user_id
     source_text = (body or {}).get("source_text", "").strip()
     if not source_text:
         raise HTTPException(400, "请先导入原文")

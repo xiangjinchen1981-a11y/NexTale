@@ -4,9 +4,9 @@ import re
 
 from ai_client import chat_text, chat_text_stream, chat_vision, AIClientError
 
-def _uid(ctx):
-    """从 ctx 提取 user_id（用于日志归属）。"""
-    return ctx.get("_user_id", "") if isinstance(ctx, dict) else ""
+def _uid(context):
+    """从 context 提取 user_id（用于日志归属）。"""
+    return context.get("_user_id", "") if isinstance(context, dict) else ""
 
 
 from prompts import get_prompt
@@ -90,7 +90,7 @@ def analyze_photo(context, image_base64):
     provider, model, mcfg = _resolve(context, "vision")
     prompt = get_prompt(context, "analyze_photo")
     content, _ = chat_vision(provider, model, _prepend_global(context, prompt), image_base64,
-                             temperature=_temperature(context, mcfg), name="分析照片", user_id=_uid(ctx))
+                             temperature=_temperature(context, mcfg), name="分析照片", user_id=_uid(context))
     appearance, personality = _parse_two_fields(content)
     return {"appearance": appearance, "personality": personality}
 
@@ -103,7 +103,7 @@ def analyze_style(context, reference_text):
     ref = reference_text[: limit if limit else 6000]
     prompt = get_prompt(context, "analyze_style").format(ref=ref)
     content, _ = chat_text(provider, model, _messages(context, prompt),
-                           temperature=_temperature(context, mcfg), name="分析风格", user_id=_uid(ctx))
+                           temperature=_temperature(context, mcfg), name="分析风格", user_id=_uid(context))
     return content.strip()
 
 
@@ -133,7 +133,7 @@ def generate_outline(context, novel):
         relationships=relationships_info,
     )
     content, _ = chat_text(provider, model, _messages(context, prompt),
-                           temperature=_temperature(context, mcfg), name="生成大纲", user_id=_uid(ctx))
+                           temperature=_temperature(context, mcfg), name="生成大纲", user_id=_uid(context))
     return _parse_outline(content, novel.get("chapter_count", 10))
 
 
@@ -218,7 +218,7 @@ def generate_chapter(context, novel, chapter_index):
         temperature=_temperature(context, mcfg),
         max_tokens=max_tokens,
         name="生成章节",
-        user_id=_uid(ctx),
+        user_id=_uid(context),
     )
     content = content.strip()
 
@@ -243,7 +243,7 @@ def stream_chapter(context, novel, chapter_index):
     for delta in chat_text_stream(
             provider, model, _messages(context, prompt),
             temperature=_temperature(context, mcfg),
-            max_tokens=max_tokens, name="生成章节", user_id=_uid(ctx)):
+            max_tokens=max_tokens, name="生成章节", user_id=_uid(context)):
         parts.append(delta)
         yield {"type": "delta", "content": delta}
 
@@ -339,7 +339,7 @@ def improv_chapter_stream(context, novel, chapter_index, instruction, context_ch
     for delta in chat_text_stream(
             provider, model, _messages(context, prompt),
             temperature=_temperature(context, mcfg),
-            max_tokens=max_tokens, name="生成章节", user_id=_uid(ctx)):
+            max_tokens=max_tokens, name="生成章节", user_id=_uid(context)):
         parts.append(delta)
         yield {"type": "delta", "content": delta}
 
@@ -370,7 +370,7 @@ def summarize_chapter_content(context, content, chapter_index, max_retries=2):
         try:
             s, _ = chat_text(provider, model, _messages(context, prompt),
                              temperature=_temperature(context, mcfg), max_tokens=300,
-                             name="生成摘要", user_id=_uid(ctx))
+                             name="生成摘要", user_id=_uid(context))
             if s and s.strip():
                 return s.strip()
             last_err = "模型返回空内容"
@@ -385,7 +385,7 @@ def condense_progress(context, progress_summary):
     prompt = get_prompt(context, "condense_progress").format(
         content=progress_summary[-8000:])
     s, _ = chat_text(provider, model, _messages(context, prompt),
-                     temperature=_temperature(context, mcfg), max_tokens=2000, name="浓缩前情", user_id=_uid(ctx))
+                     temperature=_temperature(context, mcfg), max_tokens=2000, name="浓缩前情", user_id=_uid(context))
     return s.strip()
 
 
@@ -726,7 +726,7 @@ def dialog_stream(context, novel, user_text, history, word_limit=500):
     for delta in chat_text_stream(
             provider, model, _messages(context, prompt),
             temperature=_temperature(context, mcfg),
-            max_tokens=max_tokens, name="对话推进", user_id=_uid(ctx)):
+            max_tokens=max_tokens, name="对话推进", user_id=_uid(context)):
         yield {"type": "delta", "content": delta}
 
 
@@ -828,7 +828,7 @@ def rewrite_chapter_stream(context, novel, chapter_index):
     for delta in chat_text_stream(
             provider, model, _messages(context, prompt),
             temperature=_temperature(context, mcfg),
-            max_tokens=max_tokens, name="改写章节", user_id=_uid(ctx)):
+            max_tokens=max_tokens, name="改写章节", user_id=_uid(context)):
         parts.append(delta)
         yield {"type": "delta", "content": delta}
     content = "".join(parts).strip()
@@ -888,7 +888,7 @@ def continue_chapter_stream(context, novel, chapter_index, instruction=""):
     for delta in chat_text_stream(
             provider, model, _messages(context, prompt),
             temperature=_temperature(context, mcfg),
-            max_tokens=max_tokens, name="续写章节", user_id=_uid(ctx)):
+            max_tokens=max_tokens, name="续写章节", user_id=_uid(context)):
         parts.append(delta)
         yield {"type": "delta", "content": delta}
     content = "".join(parts).strip()
@@ -1236,7 +1236,7 @@ def analyze_source_profile(context, novel, on_progress=None):
         prompt = get_prompt(context, "analyze_source").format(source=source)
         content, _ = chat_text(
             provider, model, _messages(context, prompt),
-            temperature=0.3, max_tokens=max_tokens, name="原著结构化拆解", user_id=_uid(ctx))
+            temperature=0.3, max_tokens=max_tokens, name="原著结构化拆解", user_id=_uid(context))
         if on_progress:
             on_progress(1, 1, "拆解完成，正在整理结果…")
         return _extract_json_safe(content)
