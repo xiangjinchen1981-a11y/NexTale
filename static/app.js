@@ -112,53 +112,94 @@ function hideLoading() {
 }
 
 // ============ 用户认证 ============
-// 进入登录页：判断是首次设置密码还是常规登录
+let currentUser = null;
+
 async function prepareLogin() {
   try {
     const res = await fetch('/api/auth/status');
     const d = await res.json();
-    const hint = $('login-hint');
-    const btn = $('login-btn');
-    if (d.has_password) {
-      if (hint) hint.textContent = '请输入访问密码';
-      if (btn) btn.textContent = '登录';
+    const loginCard = document.querySelector('#view-login .login-card');
+    const regCard = $('register-card');
+    if (d.has_users) {
+      loginCard.style.display = '';
+      if (regCard) regCard.style.display = 'none';
     } else {
-      if (hint) hint.textContent = '首次使用，请设置访问密码';
-      if (btn) btn.textContent = '设置密码并进入';
+      loginCard.style.display = 'none';
+      if (regCard) regCard.style.display = '';
     }
     const pwd = $('login-password');
     if (pwd) pwd.value = '';
-  } catch (e) {
-    // 忽略，保持默认提示
-  }
+    const uname = $('login-username');
+    if (uname) uname.value = '';
+  } catch (e) {}
 }
 
 async function doLogin() {
-  const pwd = ($('login-password') || {}).value || '';
-  if (!pwd) { toast('请输入密码', 'err'); return; }
+  const username = ($('login-username') || {}).value || '';
+  const password = ($('login-password') || {}).value || '';
+  if (!username || !password) { toast('请输入用户名和密码', 'err'); return; }
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: pwd }),
+      body: JSON.stringify({ username, password }),
     });
     const d = await res.json();
-    if (!res.ok) {
-      toast(d.detail || '登录失败', 'err');
-      return;
-    }
+    if (!res.ok) { toast(d.detail || '登录失败', 'err'); return; }
     authToken = d.token;
+    currentUser = d.user;
     localStorage.setItem('novel_token', authToken);
-    toast(d.first_setup ? '密码已设置' : '登录成功', 'ok');
-    // 登录成功后加载基础数据，再进入主页面
-    try {
-      await loadSettings();
-      await loadProviders();
-      await loadAllCharacters();
-      await loadGenres();
-    } catch (e) { /* 忽略，路由加载时还会再触发 */ }
-    location.hash = '#/novels';
-    await router();
+    toast('登录成功', 'ok');
+    onLoginSuccess();
   } catch (e) { toast('登录失败：' + e.message, 'err'); }
+}
+
+async function doRegister() {
+  const username = ($('reg-username') || {}).value || '';
+  const password = ($('reg-password') || {}).value || '';
+  const password2 = ($('reg-password2') || {}).value || '';
+  if (!username || !password) { toast('请输入用户名和密码', 'err'); return; }
+  if (password !== password2) { toast('两次密码不一致', 'err'); return; }
+  if (password.length < 4) { toast('密码至少 4 个字符', 'err'); return; }
+  try {
+    const res = await fetch('/api/auth/register', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const d = await res.json();
+    if (!res.ok) { toast(d.detail || '注册失败', 'err'); return; }
+    authToken = d.token;
+    currentUser = d.user;
+    localStorage.setItem('novel_token', authToken);
+    toast('管理员已创建', 'ok');
+    onLoginSuccess();
+  } catch (e) { toast('注册失败：' + e.message, 'err'); }
+}
+
+async function onLoginSuccess() {
+  updateUserUI();
+  try {
+    await loadSettings();
+    await loadProviders();
+    await loadAllCharacters();
+    await loadGenres();
+  } catch (e) {}
+  location.hash = '#/novels';
+  await router();
+}
+
+function updateUserUI() {
+  const badge = $('user-badge');
+  const btnUsers = $('btn-users');
+  const btnLogout = $('btn-logout');
+  if (currentUser) {
+    if (badge) { badge.textContent = currentUser.username; badge.style.display = ''; }
+    if (btnLogout) btnLogout.style.display = '';
+    if (btnUsers) btnUsers.style.display = currentUser.role === 'admin' ? '' : 'none';
+  } else {
+    if (badge) badge.style.display = 'none';
+    if (btnLogout) btnLogout.style.display = 'none';
+    if (btnUsers) btnUsers.style.display = 'none';
+  }
 }
 
 function logout() {
@@ -167,7 +208,9 @@ function logout() {
     headers: { 'Authorization': 'Bearer ' + authToken },
   }).catch(() => {});
   authToken = '';
+  currentUser = null;
   localStorage.removeItem('novel_token');
+  updateUserUI();
   location.hash = '#/login';
   showView('login');
   prepareLogin();
@@ -175,10 +218,97 @@ function logout() {
 
 function handleUnauthorized() {
   authToken = '';
+  currentUser = null;
   localStorage.removeItem('novel_token');
+  updateUserUI();
   location.hash = '#/login';
   showView('login');
   prepareLogin();
+}
+
+// ============ 用户管理 ============
+async function loadUsers() {
+  try {
+    const d = await api('/api/users');
+    renderUsers(d);
+  } catch (e) {}
+}
+
+function renderUsers(users) {
+  const el = $('user-list');
+  if (!el) return;
+  if (!users || !users.length) {
+    el.innerHTML = '<p class="hint">暂无其他用户</p>';
+    return;
+  }
+  el.innerHTML = `<table class="user-table"><thead><tr>
+    <th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th>
+    </tr></thead><tbody>
+    ${users.map(u => `<tr>
+      <td>${esc(u.username)}</td>
+      <td>${u.role === 'admin' ? '管理员' : '普通用户'}</td>
+      <td>${u.created_at ? new Date(u.created_at * 1000).toLocaleString('zh-CN', {hour12: false}) : '-'}</td>
+      <td>
+        <button class="btn btn-sm" onclick="changeUserPassword('${u.id}', '${esc(u.username)}')">改密码</button>
+        <button class="btn btn-sm" onclick="toggleUserRole('${u.id}', '${u.role}')">${u.role === 'admin' ? '降为普通' : '升为管理'}</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}', '${esc(u.username)}')">删除</button>
+      </td>
+    </tr>`).join('')}
+    </tbody></table>`;
+}
+
+async function createUser() {
+  const username = ($('new-username') || {}).value || '';
+  const password = ($('new-password') || {}).value || '';
+  const role = ($('new-role') || {}).value || 'user';
+  if (!username || !password) { toast('请输入用户名和密码', 'err'); return; }
+  try {
+    await api('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, role }),
+    });
+    toast('用户已创建', 'ok');
+    $('new-username').value = '';
+    $('new-password').value = '';
+    await loadUsers();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function deleteUser(uid, name) {
+  if (!confirm(`确定删除用户「${name}」？该用户的所有数据将被清除。`)) return;
+  try {
+    await api(`/api/users/${uid}`, { method: 'DELETE' });
+    toast('用户已删除', 'ok');
+    await loadUsers();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function changeUserPassword(uid, name) {
+  const pw = prompt(`为用户「${name}」设置新密码（至少4位）：`);
+  if (!pw) return;
+  if (pw.length < 4) { toast('密码至少 4 个字符', 'err'); return; }
+  try {
+    await api(`/api/users/${uid}/password`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_password: pw }),
+    });
+    toast('密码已更新', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function toggleUserRole(uid, currentRole) {
+  const newRole = currentRole === 'admin' ? 'user' : 'admin';
+  try {
+    await api(`/api/users/${uid}/role`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: newRole }),
+    });
+    toast('角色已更新', 'ok');
+    await loadUsers();
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 function esc(s) {
@@ -195,7 +325,7 @@ function maskKey(k) {
 
 // ============ 视图 / 路由 ============
 // 视图列表：login（登录）、providers（配置）、genres（题材库）、worldbooks（世界书）、novels（列表）、trash（垃圾箱）、editor（创作）、generate（生成）、chapter（章节详情）、reader（阅读）、improv（即兴写作）、dialog（对话模式）、logs（请求日志）
-const VIEWS = ['login', 'providers', 'genres', 'worldbooks', 'characters', 'character-new', 'character-detail', 'novels', 'library', 'trash', 'editor', 'generate', 'chapter', 'reader', 'improv', 'dialog', 'rewrite', 'continue', 'logs'];
+const VIEWS = ['login', 'users', 'providers', 'genres', 'worldbooks', 'characters', 'character-new', 'character-detail', 'novels', 'library', 'trash', 'editor', 'generate', 'chapter', 'reader', 'improv', 'dialog', 'rewrite', 'continue', 'logs'];
 
 // 当前小说 id（用于创作/生成页定位）
 let currentNovelId = null;
@@ -210,9 +340,13 @@ function showView(name) {
   const tabs = $('main-tabs');
   const logoutBtn = $('btn-logout');
   const providersBtn = $('btn-providers');
+  const usersBtn = $('btn-users');
+  const userBadge = $('user-badge');
   if (tabs) tabs.style.display = isLogin ? 'none' : '';
-  if (logoutBtn) logoutBtn.style.display = isLogin ? 'none' : '';
   if (providersBtn) providersBtn.style.display = isLogin ? 'none' : '';
+  if (usersBtn) usersBtn.style.display = (isLogin || !currentUser || currentUser.role !== 'admin') ? 'none' : '';
+  if (userBadge) userBadge.style.display = isLogin ? 'none' : '';
+  if (logoutBtn) logoutBtn.style.display = isLogin ? 'none' : '';
   // 顶部标签高亮（providers/配置页 与 login 不点亮任何标签）
   document.querySelectorAll('.tab').forEach(b => {
     const tab = b.dataset.tab;
@@ -222,7 +356,7 @@ function showView(name) {
     else if (tab === 'characters') active = (name === 'characters' || name === 'character-new' || name === 'character-detail');
     else if (tab === 'library') active = (name === 'library');
     else if (tab === 'logs') active = (name === 'logs');
-    else if (tab === 'novels') active = (name !== 'genres' && name !== 'worldbooks' && name !== 'characters' && name !== 'character-new' && name !== 'character-detail' && name !== 'library' && name !== 'logs' && name !== 'login' && name !== 'providers');
+    else if (tab === 'novels') active = (name !== 'genres' && name !== 'worldbooks' && name !== 'characters' && name !== 'character-new' && name !== 'character-detail' && name !== 'library' && name !== 'logs' && name !== 'login' && name !== 'providers' && name !== 'users');
     b.classList.toggle('active', active);
   });
   // 视图切换时触发对应数据加载
@@ -256,6 +390,12 @@ async function router() {
 
   if (section === 'providers') {
     showView('providers');
+    return;
+  }
+
+  if (section === 'users') {
+    showView('users');
+    await loadUsers();
     return;
   }
 
@@ -4486,20 +4626,30 @@ async function analyzeSourceProfile() {
 
 // ============ 初始化 ============
 (async function init() {
+  // 登录表单 Enter 键支持
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      if (e.target.id === 'login-password' || e.target.id === 'login-username') doLogin();
+      else if (e.target.id === 'reg-password' || e.target.id === 'reg-password2' || e.target.id === 'reg-username') doRegister();
+    }
+  });
+
   // 未登录：直接进入登录页，不加载数据
   if (!authToken) {
     await router();
     return;
   }
   try {
+    // 恢复当前用户信息
+    const me = await api('/api/auth/me');
+    currentUser = me;
+    updateUserUI();
     await loadSettings();
     await loadProviders();
     await loadAllCharacters();
     await loadGenres();
-    // 根据 hash 路由进入对应视图
     await router();
   } catch (e) {
-    // 401 等认证错误已由 api() 处理跳转登录
     if (authToken) {
       toast('初始化失败：' + e.message, 'err');
     }

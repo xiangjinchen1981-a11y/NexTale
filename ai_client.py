@@ -23,7 +23,7 @@ class AIClientError(Exception):
 
 
 def _log_request(kind, provider, model, prompt, status="ok", elapsed=0.0,
-                 prompt_tokens=None, completion_tokens=None, error="", name=""):
+                 prompt_tokens=None, completion_tokens=None, error="", name="", user_id=""):
     """记录 AI 请求日志（延迟导入 storage，避免循环依赖）。"""
     try:
         import storage
@@ -31,7 +31,7 @@ def _log_request(kind, provider, model, prompt, status="ok", elapsed=0.0,
         storage.add_log(kind, pname, model or "", prompt or "",
                         status=status, elapsed=elapsed,
                         prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
-                        error=error, name=name)
+                        error=error, name=name, user_id=user_id)
     except Exception:  # noqa: BLE001
         pass  # 日志失败不影响主流程
 
@@ -74,7 +74,7 @@ def _build_client(provider):
     return OpenAI(**kwargs)
 
 
-def chat_text(provider, model, messages, temperature=0.8, max_tokens=None, name=""):
+def chat_text(provider, model, messages, temperature=0.8, max_tokens=None, name="", user_id=""):
     """纯文本对话补全，返回 (content, usage)。name 为语义化操作名（用于日志）。"""
     prompt_snapshot = _snapshot_messages(messages)
     start = time.time()
@@ -99,19 +99,19 @@ def chat_text(provider, model, messages, temperature=0.8, max_tokens=None, name=
                      status="ok", elapsed=time.time() - start,
                      prompt_tokens=(usage or {}).get("prompt_tokens"),
                      completion_tokens=(usage or {}).get("completion_tokens"),
-                     name=name)
+                     name=name, user_id=user_id)
         return content, usage
     except AIClientError as e:
         _log_request("chat", provider, model, prompt_snapshot,
-                     status="error", elapsed=time.time() - start, error=str(e), name=name)
+                     status="error", elapsed=time.time() - start, error=str(e), name=name, user_id=user_id)
         raise
     except Exception as e:  # noqa: BLE001
         _log_request("chat", provider, model, prompt_snapshot,
-                     status="error", elapsed=time.time() - start, error=str(e), name=name)
+                     status="error", elapsed=time.time() - start, error=str(e), name=name, user_id=user_id)
         raise AIClientError(_friendly_error(e)) from e
 
 
-def chat_text_stream(provider, model, messages, temperature=0.8, max_tokens=None, name=""):
+def chat_text_stream(provider, model, messages, temperature=0.8, max_tokens=None, name="", user_id=""):
     """流式文本对话补全，yield 每个增量片段（用于实时输出）。
 
     使用 httpx 原生 SSE 请求，逐 token 立即返回（避免 OpenAI SDK 内部缓冲）。
@@ -177,18 +177,18 @@ def chat_text_stream(provider, model, messages, temperature=0.8, max_tokens=None
                 if c:
                     yield c
         _log_request("chat_stream", provider, model, prompt_snapshot,
-                     status="ok", elapsed=time.time() - start, name=name)
+                     status="ok", elapsed=time.time() - start, name=name, user_id=user_id)
     except AIClientError as e:
         _log_request("chat_stream", provider, model, prompt_snapshot,
-                     status="error", elapsed=time.time() - start, error=str(e), name=name)
+                     status="error", elapsed=time.time() - start, error=str(e), name=name, user_id=user_id)
         raise
     except Exception as e:  # noqa: BLE001
         _log_request("chat_stream", provider, model, prompt_snapshot,
-                     status="error", elapsed=time.time() - start, error=str(e), name=name)
+                     status="error", elapsed=time.time() - start, error=str(e), name=name, user_id=user_id)
         raise AIClientError(_friendly_error(e)) from e
 
 
-def chat_vision(provider, model, prompt, image_base64, temperature=0.5, max_tokens=None, name=""):
+def chat_vision(provider, model, prompt, image_base64, temperature=0.5, max_tokens=None, name="", user_id=""):
     """视觉分析：传入 base64 图片与文字提示，返回 (content, usage)。name 为语义化操作名（用于日志）。"""
     start = time.time()
     try:
@@ -222,11 +222,11 @@ def chat_vision(provider, model, prompt, image_base64, temperature=0.5, max_toke
                      status="ok", elapsed=time.time() - start,
                      prompt_tokens=(usage or {}).get("prompt_tokens"),
                      completion_tokens=(usage or {}).get("completion_tokens"),
-                     name=name)
+                     name=name, user_id=user_id)
         return content, usage
     except Exception as e:  # noqa: BLE001
         _log_request("vision", provider, model, prompt,
-                     status="error", elapsed=time.time() - start, error=str(e), name=name)
+                     status="error", elapsed=time.time() - start, error=str(e), name=name, user_id=user_id)
         raise AIClientError(_friendly_error(e)) from e
 
 

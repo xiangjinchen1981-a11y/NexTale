@@ -35,33 +35,37 @@ app.add_middleware(
 
 
 # ================= 用户认证 =================
-# 会话 token 集合（内存态，进程重启后需重新登录）
-_SESSIONS: set[str] = set()
-
 # 无需登录即可访问的路径前缀
 _PUBLIC_PREFIXES = ("/api/auth/",)
 
-# 无需登录即可访问的路径（静态资源由 StaticFiles 处理，不走此中间件逻辑）
-_PUBLIC_EXACT = ()
+# 简单的会话缓存：token -> user_id（减少 DB 查询）
+_session_cache: dict[str, str] = {}
 
 
-def _issue_token() -> str:
-    token = secrets.token_urlsafe(32)
-    _SESSIONS.add(token)
-    return token
+def _resolve_user(token: str) -> str | None:
+    """从缓存或 DB 解析 token 对应的 user_id。"""
+    if token in _session_cache:
+        return _session_cache[token]
+    uid = storage.get_session(token)
+    if uid:
+        _session_cache[token] = uid
+    return uid
 
 
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """保护所有 /api/* 接口（除登录相关），未携带有效 token 返回 401；HTML 禁用缓存。"""
     path = request.url.path
-    if path.startswith("/api/") and not path.startswith(_PUBLIC_PREFIXES):
+    if path.startswith("/api/"):
         auth = request.headers.get("Authorization", "")
         token = auth[7:] if auth.startswith("Bearer ") else ""
-        if token not in _SESSIONS:
+        uid = _resolve_user(token)
+        is_public = path.startswith(_PUBLIC_PREFIXES)
+        if uid:
+            request.state.user_id = uid
+        elif not is_public:
             return JSONResponse(status_code=401, content={"detail": "未登录或登录已过期"})
     response = await call_next(request)
-    # 对 HTML 页面禁用缓存，确保前端改动及时生效
     if not path.startswith("/api/") and (path == "/" or path.endswith(".html")):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
@@ -70,23 +74,51 @@ async def auth_middleware(request: Request, call_next):
 
 @app.get("/api/auth/status")
 def auth_status():
-    """返回是否已设置密码（用于前端决定显示登录还是首次设置密码）。"""
-    return {"has_password": storage.has_password(), "authenticated": False}
+    """返回是否已有用户（用于前端决定显示登录还是创建管理员）。"""
+    return {"has_users": storage.has_users()}
 
 
 @app.post("/api/auth/login")
-def auth_login(body: dict):
-    """登录：校验密码，返回 session token。"""
-    password = (body or {}).get("password", "")
-    if not storage.has_password():
-        # 首次使用：此密码即为初始密码
-        if not password:
-            raise HTTPException(400, "请设置初始密码")
-        storage.set_password(password)
-        return {"token": _issue_token(), "first_setup": True}
-    if not storage.verify_password(password):
-        raise HTTPException(401, "密码错误")
-    return {"token": _issue_token(), "first_setup": False}
+def auth_login(request: Request, body: dict):
+    """登录：校验用户名+密码，返回 session token + 用户信息。"""
+    b = body or {}
+    username = b.get("username", "").strip()
+    password = b.get("password", "")
+    if not username or not password:
+        raise HTTPException(400, "请输入用户名和密码")
+    user = storage.verify_user_password(username, password)
+    if not user:
+        raise HTTPException(401, "用户名或密码错误")
+    token = storage.create_session(user["id"])
+    _session_cache[token] = user["id"]
+    return {"token": token, "user": user}
+
+
+@app.post("/api/auth/register")
+def auth_register(body: dict):
+    """首次创建管理员账号。"""
+    b = body or {}
+    if storage.has_users():
+        raise HTTPException(400, "已有用户，无法注册")
+    username = b.get("username", "").strip()
+    password = b.get("password", "")
+    if not username or not password:
+        raise HTTPException(400, "请输入用户名和密码")
+    if len(password) < 4:
+        raise HTTPException(400, "密码至少 4 个字符")
+    user = storage.create_user(username, password, role="admin")
+    token = storage.create_session(user["id"])
+    _session_cache[token] = user["id"]
+    return {"token": token, "user": user}
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    """返回当前登录用户信息。"""
+    uid = getattr(request.state, "user_id", None)
+    if not uid:
+        raise HTTPException(401, "未登录")
+    return storage.get_user(uid)
 
 
 @app.post("/api/auth/logout")
@@ -94,21 +126,85 @@ def auth_logout(request: Request):
     """退出登录：使当前 token 失效。"""
     auth = request.headers.get("Authorization", "")
     token = auth[7:] if auth.startswith("Bearer ") else ""
-    _SESSIONS.discard(token)
+    storage.delete_session(token)
+    _session_cache.pop(token, None)
+    return {"ok": True}
+
+
+# ================= 用户管理（仅管理员） =================
+
+def _require_admin(request: Request):
+    user = storage.get_user(request.state.user_id)
+    if not user or user.get("role") != "admin":
+        raise HTTPException(403, "仅管理员可操作")
+    return user
+
+
+@app.get("/api/users")
+def list_users_api(request: Request):
+    _require_admin(request)
+    return storage.list_users()
+
+
+@app.post("/api/users")
+def create_user_api(request: Request, body: dict):
+    _require_admin(request)
+    b = body or {}
+    username = b.get("username", "").strip()
+    password = b.get("password", "")
+    role = b.get("role", "user")
+    if not username or not password:
+        raise HTTPException(400, "请输入用户名和密码")
+    if role not in ("admin", "user"):
+        raise HTTPException(400, "角色无效")
+    try:
+        return storage.create_user(username, password, role)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.delete("/api/users/{uid}")
+def delete_user_api(request: Request, uid: str):
+    me = _require_admin(request)
+    if uid == me["id"]:
+        raise HTTPException(400, "不能删除自己")
+    storage.delete_user(uid)
+    return {"ok": True}
+
+
+@app.put("/api/users/{uid}/password")
+def change_password_api(request: Request, uid: str, body: dict):
+    me = _require_admin(request)
+    new_pw = (body or {}).get("new_password", "")
+    if not new_pw or len(new_pw) < 4:
+        raise HTTPException(400, "密码至少 4 个字符")
+    storage.update_user_password(uid, new_pw)
+    return {"ok": True}
+
+
+@app.put("/api/users/{uid}/role")
+def change_role_api(request: Request, uid: str, body: dict):
+    me = _require_admin(request)
+    new_role = (body or {}).get("role", "")
+    if new_role not in ("admin", "user"):
+        raise HTTPException(400, "角色无效")
+    if uid == me["id"] and new_role != "admin":
+        raise HTTPException(400, "不能取消自己的管理员权限")
+    storage.update_user_role(uid, new_role)
     return {"ok": True}
 
 
 # ---------- 上下文 ----------
-def _ctx(novel: dict | None = None):
-    settings = storage.get_settings()
-    # 小说级模型选择：若该小说指定了 text_model_id，则覆盖全局默认
+def _ctx(novel: dict | None = None, user_id: str = ""):
+    settings = storage.get_settings(user_id)
     if novel and novel.get("text_model_id"):
         settings = {**settings, "text_model_id": novel["text_model_id"]}
     return {
-        "providers": storage.list_providers(),
+        "providers": storage.list_providers(user_id),
         "settings": settings,
-        "characters": storage.list_characters(),
-        "worldbooks": storage.list_worldbooks(),
+        "characters": storage.list_characters(user_id),
+        "worldbooks": storage.list_worldbooks(user_id),
+        "_user_id": user_id,
     }
 
 
@@ -141,13 +237,15 @@ class ModelIn(BaseModel):
 
 
 @app.get("/api/providers")
-def get_providers():
-    return {"providers": storage.list_providers(),
+def get_providers(request: Request):
+    uid = request.state.user_id
+    return {"providers": storage.list_providers(uid),
             "presets": PRESET_BASE_URLS}
 
 
 @app.post("/api/providers/connect")
-def connect_provider(c: ConnectIn):
+def connect_provider(request: Request, c: ConnectIn):
+    uid = request.state.user_id
     """用给定配置连接服务商并拉取模型列表（无需先保存）。"""
     if not c.base_url.strip():
         raise HTTPException(400, "base_url 不能为空")
@@ -164,6 +262,7 @@ def connect_provider(c: ConnectIn):
 
 
 def _provider_dict(p: ProviderIn) -> dict:
+    uid = request.state.user_id
     return {
         "name": p.name.strip() or p.base_url.strip(),
         "base_url": p.base_url.strip(),
@@ -173,58 +272,62 @@ def _provider_dict(p: ProviderIn) -> dict:
     }
 
 
-def _find_provider(pid):
-    for p in storage.list_providers():
+def _find_provider(pid, user_id=""):
+    for p in storage.list_providers(user_id):
         if p.get("id") == pid:
             return p
     return None
 
 
 @app.post("/api/providers")
-def upsert_provider(p: ProviderIn):
+def upsert_provider(request: Request, p: ProviderIn):
+    uid = request.state.user_id
     if not p.base_url.strip():
         raise HTTPException(400, "base_url 不能为空")
-    providers = storage.list_providers()
+    providers = storage.list_providers(uid)
     providers.append({"id": storage.new_id(), **_provider_dict(p)})
-    storage.save_providers(providers)
+    storage.save_providers(providers, uid)
     return {"providers": providers}
 
 
 @app.put("/api/providers/{pid}")
-def update_provider(pid: str, p: ProviderIn):
+def update_provider(request: Request, pid: str, p: ProviderIn):
+    uid = request.state.user_id
     if not p.base_url.strip():
         raise HTTPException(400, "base_url 不能为空")
-    providers = storage.list_providers()
+    providers = storage.list_providers(uid)
     for i, pr in enumerate(providers):
         if pr.get("id") == pid:
             existing_models = pr.get("models", [])
             providers[i] = {"id": pid, **_provider_dict(p)}
             providers[i]["models"] = existing_models
-            storage.save_providers(providers)
+            storage.save_providers(providers, uid)
             return {"providers": providers}
     raise HTTPException(404, "服务商不存在")
 
 
 @app.delete("/api/providers/{pid}")
-def delete_provider(pid: str):
-    target = _find_provider(pid)
-    providers = [p for p in storage.list_providers() if p.get("id") != pid]
-    storage.save_providers(providers)
+def delete_provider(request: Request, pid: str):
+    uid = request.state.user_id
+    target = _find_provider(pid, uid)
+    providers = [p for p in storage.list_providers(uid) if p.get("id") != pid]
+    storage.save_providers(providers, uid)
     if target:
         model_ids = {m.get("id") for m in target.get("models", [])}
-        s = storage.get_settings()
+        s = storage.get_settings(uid)
         changed = False
         for key in ("text_model_id", "vision_model_id"):
             if s.get(key) in model_ids:
                 s[key] = ""
                 changed = True
         if changed:
-            storage.save_settings(s)
+            storage.save_settings(s, uid)
     return {"providers": providers}
 
 
 # ================= 模型（挂在服务商下） =================
 def _model_dict(m: ModelIn) -> dict:
+    uid = request.state.user_id
     return {
         "id": storage.new_id(),
         "name": m.name.strip(),
@@ -236,27 +339,29 @@ def _model_dict(m: ModelIn) -> dict:
 
 
 @app.post("/api/providers/{pid}/models")
-def add_model(pid: str, m: ModelIn):
+def add_model(request: Request, pid: str, m: ModelIn):
+    uid = request.state.user_id
     if not m.name.strip():
         raise HTTPException(400, "模型名不能为空")
     if m.type not in ("text", "vision"):
         raise HTTPException(400, "模型类型必须为 text 或 vision")
-    providers = storage.list_providers()
+    providers = storage.list_providers(uid)
     for p in providers:
         if p.get("id") == pid:
             p.setdefault("models", []).append(_model_dict(m))
-            storage.save_providers(providers)
+            storage.save_providers(providers, uid)
             return {"providers": providers}
     raise HTTPException(404, "服务商不存在")
 
 
 @app.put("/api/providers/{pid}/models/{mid}")
-def update_model(pid: str, mid: str, m: ModelIn):
+def update_model(request: Request, pid: str, mid: str, m: ModelIn):
+    uid = request.state.user_id
     if not m.name.strip():
         raise HTTPException(400, "模型名不能为空")
     if m.type not in ("text", "vision"):
         raise HTTPException(400, "模型类型必须为 text 或 vision")
-    providers = storage.list_providers()
+    providers = storage.list_providers(uid)
     for p in providers:
         if p.get("id") == pid:
             for i, mm in enumerate(p.get("models", [])):
@@ -264,33 +369,35 @@ def update_model(pid: str, mid: str, m: ModelIn):
                     new = _model_dict(m)
                     new["id"] = mid
                     p["models"][i] = new
-                    storage.save_providers(providers)
+                    storage.save_providers(providers, uid)
                     return {"providers": providers}
     raise HTTPException(404, "模型不存在")
 
 
 @app.delete("/api/providers/{pid}/models/{mid}")
-def delete_model(pid: str, mid: str):
-    providers = storage.list_providers()
+def delete_model(request: Request, pid: str, mid: str):
+    uid = request.state.user_id
+    providers = storage.list_providers(uid)
     for p in providers:
         if p.get("id") == pid:
             p["models"] = [m for m in p.get("models", []) if m.get("id") != mid]
-            storage.save_providers(providers)
-            s = storage.get_settings()
+            storage.save_providers(providers, uid)
+            s = storage.get_settings(uid)
             changed = False
             for key in ("text_model_id", "vision_model_id"):
                 if s.get(key) == mid:
                     s[key] = ""
                     changed = True
             if changed:
-                storage.save_settings(s)
+                storage.save_settings(s, uid)
             return {"providers": providers}
     raise HTTPException(404, "服务商不存在")
 
 
 @app.post("/api/providers/{pid}/models/{mid}/test")
-def test_model(pid: str, mid: str):
-    provider = _find_provider(pid)
+def test_model(request: Request, pid: str, mid: str):
+    uid = request.state.user_id
+    provider = _find_provider(pid, uid)
     if not provider:
         raise HTTPException(404, "服务商不存在")
     model = next((m for m in provider.get("models", []) if m.get("id") == mid), None)
@@ -303,27 +410,30 @@ def test_model(pid: str, mid: str):
 
 # ================= 设置 =================
 @app.get("/api/settings")
-def get_settings():
-    return storage.get_settings()
+def get_settings(request: Request):
+    uid = request.state.user_id
+    return storage.get_settings(uid)
 
 
 @app.post("/api/settings")
-def save_settings(body: dict):
+def save_settings(request: Request, body: dict):
+    uid = request.state.user_id
     allowed = {"text_model_id", "vision_model_id",
                "token_ratio", "temperature", "global_prompt", "prompts"}
-    cur = storage.get_settings()
+    cur = storage.get_settings(uid)
     for k in allowed:
         if k in body:
             cur[k] = body[k]
-    storage.save_settings(cur)
+    storage.save_settings(cur, uid)
     return cur
 
 
 # ================= 提示词配置 =================
 @app.get("/api/prompts")
-def get_prompts():
+def get_prompts(request: Request):
+    uid = request.state.user_id
     """返回所有提示词的定义（含默认值）与当前自定义值。"""
-    custom = storage.get_settings().get("prompts") or {}
+    custom = storage.get_settings(uid).get("prompts") or {}
     return {
         "defs": prompts.get_all_defs(),
         "custom": custom,
@@ -331,7 +441,8 @@ def get_prompts():
 
 
 @app.post("/api/prompts")
-def save_prompts(body: dict):
+def save_prompts(request: Request, body: dict):
+    uid = request.state.user_id
     """保存提示词自定义值。body: {prompts: {key: 模板文本, ...}}。"""
     new_prompts = (body or {}).get("prompts")
     if not isinstance(new_prompts, dict):
@@ -344,24 +455,25 @@ def save_prompts(body: dict):
             continue
         if v and str(v).strip():
             cleaned[k] = str(v).strip()
-    cur = storage.get_settings()
+    cur = storage.get_settings(uid)
     cur["prompts"] = cleaned
-    storage.save_settings(cur)
+    storage.save_settings(cur, uid)
     return {"prompts": cleaned}
 
 
 # ================= AI 请求日志 =================
 @app.get("/api/logs")
-def get_logs(page: int = 1, page_size: int = 20):
+def get_logs(request: Request, page: int = 1, page_size: int = 20):
+    uid = request.state.user_id
     """分页返回日志：page 从 1 开始。"""
     page = max(1, int(page))
     page_size = max(1, min(int(page_size), 200))
-    total = storage.count_logs()
+    total = storage.count_logs(uid)
     total_pages = max(1, (total + page_size - 1) // page_size)
     page = min(page, total_pages)
     offset = (page - 1) * page_size
     return {
-        "logs": storage.list_logs(page_size, offset),
+        "logs": storage.list_logs(uid, page_size, offset),
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -371,12 +483,14 @@ def get_logs(page: int = 1, page_size: int = 20):
 
 # ================= 题材库 =================
 @app.get("/api/genres")
-def get_genres():
-    return {"genres": storage.list_genres()}
+def get_genres(request: Request):
+    uid = request.state.user_id
+    return {"genres": storage.list_genres(uid)}
 
 
 @app.post("/api/genres")
-def create_genre(body: dict):
+def create_genre(request: Request, body: dict):
+    uid = request.state.user_id
     name = (body or {}).get("name", "").strip()
     if not name:
         raise HTTPException(400, "题材名称不能为空")
@@ -386,30 +500,33 @@ def create_genre(body: dict):
         "reference_text": (body or {}).get("reference_text", ""),
         "description": (body or {}).get("description", ""),
         "created_at": time.time(),
-    })
-    return {"genres": storage.list_genres(), "id": gid}
+    }, uid)
+    return {"genres": storage.list_genres(uid), "id": gid}
 
 
 @app.put("/api/genres/{gid}")
-def update_genre(gid: str, body: dict):
-    g = storage.get_genre(gid)
+def update_genre(request: Request, gid: str, body: dict):
+    uid = request.state.user_id
+    g = storage.get_genre(gid, uid)
     if not g:
         raise HTTPException(404, "题材不存在")
     for k in ("name", "style", "reference_text", "description"):
         if k in body:
             g[k] = body[k]
-    storage.save_genre(g)
-    return {"genres": storage.list_genres()}
+    storage.save_genre(g, uid)
+    return {"genres": storage.list_genres(uid)}
 
 
 @app.delete("/api/genres/{gid}")
-def delete_genre(gid: str):
-    storage.delete_genre(gid)
-    return {"genres": storage.list_genres()}
+def delete_genre(request: Request, gid: str):
+    uid = request.state.user_id
+    storage.delete_genre(gid, uid)
+    return {"genres": storage.list_genres(uid)}
 
 
 @app.post("/api/genres/import")
-def import_genres(body: dict):
+def import_genres(request: Request, body: dict):
+    uid = request.state.user_id
     """批量导入题材库：body 为 {genres: [{name, style, reference_text, description}, ...]}。"""
     items = (body or {}).get("genres", [])
     if not isinstance(items, list) or not items:
@@ -425,12 +542,13 @@ def import_genres(body: dict):
             })
     if not valid:
         raise HTTPException(400, "导入数据中没有有效的题材（缺少 name 字段）")
-    count = storage.save_genres(valid)
-    return {"genres": storage.list_genres(), "imported": count}
+    count = storage.save_genres(valid, uid)
+    return {"genres": storage.list_genres(uid), "imported": count}
 
 
 # ================= 世界书 =================
 def _normalize_worldbook_entry(e: dict) -> dict:
+    uid = request.state.user_id
     """把 SillyTavern 世界书条目规范化为内部结构。"""
     keys = e.get("key") or e.get("keys") or []
     if isinstance(keys, str):
@@ -467,6 +585,7 @@ def _normalize_worldbook_entry(e: dict) -> dict:
 
 
 def _parse_sillytavern_worldbook(data: dict) -> dict:
+    uid = request.state.user_id
     """解析 SillyTavern 世界书 JSON，返回 {name, description, entries}。
 
     兼容 entries 为对象（key 为 uid 字符串）或数组两种形式。
@@ -493,12 +612,14 @@ def _parse_sillytavern_worldbook(data: dict) -> dict:
 
 
 @app.get("/api/worldbooks")
-def get_worldbooks():
-    return {"worldbooks": storage.list_worldbooks()}
+def get_worldbooks(request: Request):
+    uid = request.state.user_id
+    return {"worldbooks": storage.list_worldbooks(uid)}
 
 
 @app.post("/api/worldbooks")
-def create_worldbook(body: dict):
+def create_worldbook(request: Request, body: dict):
+    uid = request.state.user_id
     name = (body or {}).get("name", "").strip()
     if not name:
         raise HTTPException(400, "世界书名称不能为空")
@@ -510,13 +631,14 @@ def create_worldbook(body: dict):
         "description": (body or {}).get("description", ""),
         "entries": entries,
         "created_at": time.time(),
-    })
-    return {"worldbooks": storage.list_worldbooks(), "id": wb_id}
+    }, uid)
+    return {"worldbooks": storage.list_worldbooks(uid), "id": wb_id}
 
 
 @app.put("/api/worldbooks/{wid}")
-def update_worldbook(wid: str, body: dict):
-    wb = storage.get_worldbook(wid)
+def update_worldbook(request: Request, wid: str, body: dict):
+    uid = request.state.user_id
+    wb = storage.get_worldbook(wid, uid)
     if not wb:
         raise HTTPException(404, "世界书不存在")
     if "name" in body:
@@ -528,18 +650,20 @@ def update_worldbook(wid: str, body: dict):
         if not isinstance(entries, list):
             raise HTTPException(400, "entries 应为数组")
         wb["entries"] = entries
-    storage.save_worldbook(wb)
-    return {"worldbooks": storage.list_worldbooks()}
+    storage.save_worldbook(wb, uid)
+    return {"worldbooks": storage.list_worldbooks(uid)}
 
 
 @app.delete("/api/worldbooks/{wid}")
-def delete_worldbook(wid: str):
-    storage.delete_worldbook(wid)
-    return {"worldbooks": storage.list_worldbooks()}
+def delete_worldbook(request: Request, wid: str):
+    uid = request.state.user_id
+    storage.delete_worldbook(wid, uid)
+    return {"worldbooks": storage.list_worldbooks(uid)}
 
 
 @app.post("/api/worldbooks/import")
-def import_worldbook(body: dict):
+def import_worldbook(request: Request, body: dict):
+    uid = request.state.user_id
     """导入 SillyTavern 世界书 JSON。body: {name?, description?, data: {...}}。"""
     data = (body or {}).get("data")
     if isinstance(data, str):
@@ -556,22 +680,23 @@ def import_worldbook(body: dict):
         "description": (body or {}).get("description", "").strip() or parsed["description"],
         "entries": parsed["entries"],
         "created_at": time.time(),
-    })
-    return {"worldbooks": storage.list_worldbooks(), "id": wb_id,
+    }, uid)
+    return {"worldbooks": storage.list_worldbooks(uid), "id": wb_id,
             "imported": len(parsed["entries"])}
 
 
 # ================= 角色 =================
 @app.get("/api/characters")
-def get_characters(novel_id: str = "", limit: int = 20):
+def get_characters(request: Request, novel_id: str = "", limit: int = 20):
+    uid = request.state.user_id
     """按需返回角色。
 
     - 传 novel_id：只返回该小说关联的角色（按 created_at 倒序）
     - 不传 novel_id：返回最新的 limit 个角色（默认 20）
     """
-    all_chars = storage.list_characters()  # 已按 created_at 倒序
+    all_chars = storage.list_characters(uid)  # 已按 created_at 倒序
     if novel_id:
-        novel = storage.get_novel(novel_id)
+        novel = storage.get_novel(novel_id, uid)
         ids = set((novel or {}).get("character_ids") or [])
         characters = [c for c in all_chars if c.get("id") in ids]
     else:
@@ -584,17 +709,19 @@ def get_characters(novel_id: str = "", limit: int = 20):
 
 
 @app.get("/api/characters/novels")
-def get_character_novels():
+def get_character_novels(request: Request):
+    uid = request.state.user_id
     """返回小说列表（供角色库筛选下拉使用）。"""
-    novels = storage.list_novels()
+    novels = storage.list_novels(uid)
     novel_map = [{"id": n.get("id"), "title": n.get("title", ""),
                   "character_ids": n.get("character_ids", [])} for n in novels]
     return {"novels": novel_map}
 
 
 @app.post("/api/characters")
-def create_character(body: dict):
-    characters = storage.list_characters()
+def create_character(request: Request, body: dict):
+    uid = request.state.user_id
+    characters = storage.list_characters(uid)
     c = {
         "id": storage.new_id(),
         "name": body.get("name", "").strip(),
@@ -606,34 +733,36 @@ def create_character(body: dict):
         "created_at": time.time(),
     }
     characters.append(c)
-    storage.save_characters(characters)
+    storage.save_characters(characters, uid)
     return {"character": c}
 
 
 @app.put("/api/characters/{cid}")
-def update_character(cid: str, body: dict):
-    chars = storage.list_characters()
+def update_character(request: Request, cid: str, body: dict):
+    uid = request.state.user_id
+    chars = storage.list_characters(uid)
     for c in chars:
         if c.get("id") == cid:
             for k in ("name", "appearance", "personality", "background", "notes"):
                 if k in body:
                     c[k] = body[k]
-            storage.save_characters(chars)
+            storage.save_characters(chars, uid)
             return {"character": c}
     raise HTTPException(404, "角色不存在")
 
 
 @app.delete("/api/characters/{cid}")
-def delete_character(cid: str):
-    chars = [c for c in storage.list_characters() if c.get("id") != cid]
-    storage.save_characters(chars)
+def delete_character(request: Request, cid: str):
+    uid = request.state.user_id
+    chars = [c for c in storage.list_characters(uid) if c.get("id") != cid]
+    storage.save_characters(chars, uid)
     # 同步清理所有小说中对该角色的引用（避免残留失效 id）
-    for n in storage.list_novels():
+    for n in storage.list_novels(uid):
         ids = n.get("character_ids") or []
         if cid in ids:
             def mut(m):
                 m["character_ids"] = [x for x in (m.get("character_ids") or []) if x != cid]
-            storage.update_novel(n["id"], mut)
+            storage.update_novel(n["id"], uid, mut)
     return {"characters": chars}
 
 
@@ -650,7 +779,7 @@ async def upload_photo(cid: str, file: UploadFile = File(...)):
     fpath = storage.UPLOAD_DIR / fname
     fpath.write_bytes(data)
 
-    chars = storage.list_characters()
+    chars = storage.list_characters(uid)
     target = None
     for c in chars:
         if c.get("id") == cid:
@@ -659,7 +788,7 @@ async def upload_photo(cid: str, file: UploadFile = File(...)):
             break
     if not target:
         raise HTTPException(404, "角色不存在")
-    storage.save_characters(chars)
+    storage.save_characters(chars, uid)
     return {"character": target}
 
 
@@ -669,7 +798,7 @@ async def analyze_character_photo(file: UploadFile = File(...)):
     data = await file.read()
     if not data:
         raise HTTPException(400, "文件为空")
-    ctx = _ctx()
+    ctx = _ctx(user_id=uid)
     if not ctx["settings"].get("vision_model_id"):
         raise HTTPException(400, "未配置视觉模型，请先在「配置」页添加并选用视觉模型")
     try:
@@ -682,24 +811,28 @@ async def analyze_character_photo(file: UploadFile = File(...)):
 
 # ================= 小说 =================
 def _ensure_not_finished(n: dict):
+    uid = request.state.user_id
     """完结的小说不可再修改，任何写操作前调用此守卫。"""
     if n.get("status") == "finished":
         raise HTTPException(409, "该小说已完结，如需修改请先「重开」")
 
 
 @app.get("/api/novels")
-def get_novels():
-    return {"novels": storage.list_novels()}
+def get_novels(request: Request):
+    uid = request.state.user_id
+    return {"novels": storage.list_novels(uid)}
 
 
 @app.get("/api/novels/trash")
-def get_trashed_novels():
-    return {"novels": storage.list_deleted_novels()}
+def get_trashed_novels(request: Request):
+    uid = request.state.user_id
+    return {"novels": storage.list_deleted_novels(uid)}
 
 
 @app.post("/api/novels")
-def create_novel(body: dict):
-    novels = storage.list_novels()
+def create_novel(request: Request, body: dict):
+    uid = request.state.user_id
+    novels = storage.list_novels(uid)
     mode = body.get("mode", "outline")
     source_text = body.get("source_text", "")
     task_instruction = body.get("task_instruction", "")
@@ -733,45 +866,50 @@ def create_novel(body: dict):
         n["chapters"] = generators.split_source_chapters(
             source_text, int(n["words_per_chapter"]))
     novels.append(n)
-    storage.save_novels(novels)
+    storage.save_novels(novels, uid)
     return {"novel": n}
 
 
 @app.get("/api/novels/{nid}")
-def get_novel(nid: str):
-    n = storage.get_novel(nid)
+def get_novel(request: Request, nid: str):
+    uid = request.state.user_id
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
     return {"novel": n}
 
 
 @app.delete("/api/novels/{nid}")
-def delete_novel(nid: str):
+def delete_novel(request: Request, nid: str):
+    uid = request.state.user_id
     """软删除：小说进入垃圾箱，可恢复。"""
-    if not storage.trash_novel(nid):
+    if not storage.trash_novel(nid, uid):
         raise HTTPException(404, "小说不存在")
     return {"ok": True}
 
 
 @app.post("/api/novels/{nid}/restore")
-def restore_novel(nid: str):
+def restore_novel(request: Request, nid: str):
+    uid = request.state.user_id
     """从垃圾箱恢复小说。"""
-    if not storage.restore_novel(nid):
+    if not storage.restore_novel(nid, uid):
         raise HTTPException(404, "垃圾箱中未找到该小说")
     return {"ok": True}
 
 
 @app.delete("/api/novels/{nid}/destroy")
-def destroy_novel(nid: str):
+def destroy_novel(request: Request, nid: str):
+    uid = request.state.user_id
     """彻底删除小说（不可恢复）。"""
-    if not storage.destroy_novel(nid):
+    if not storage.destroy_novel(nid, uid):
         raise HTTPException(404, "小说不存在")
     return {"ok": True}
 
 
 @app.put("/api/novels/{nid}")
-def update_novel(nid: str, body: dict):
-    _ensure_not_finished(storage.get_novel(nid) or {})
+def update_novel(request: Request, nid: str, body: dict):
+    uid = request.state.user_id
+    _ensure_not_finished(storage.get_novel(nid, uid) or {})
     editable = {"title", "genre", "style", "reference_text", "character_ids",
                 "relationships", "chapter_count", "words_per_chapter",
                 "text_model_id", "summary", "worldbuilding", "background", "mode",
@@ -803,16 +941,17 @@ def update_novel(nid: str, body: dict):
                     "word_count": (old_by_idx.get(idx) or {}).get("word_count", 0),
                 })
             n["chapters"] = merged
-    n = storage.update_novel(nid, mut)
+    n = storage.update_novel(nid, uid, mut)
     if not n:
         raise HTTPException(404, "小说不存在")
     return {"novel": n}
 
 
 @app.post("/api/novels/{nid}/finish")
-def finish_novel(nid: str):
+def finish_novel(request: Request, nid: str):
+    uid = request.state.user_id
     """将小说标记为完结，完结后不可再修改。"""
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
     if n.get("status") == "finished":
@@ -821,13 +960,14 @@ def finish_novel(nid: str):
     def mut(m):
         m["status"] = "finished"
 
-    return {"novel": storage.update_novel(nid, mut)}
+    return {"novel": storage.update_novel(nid, uid, mut)}
 
 
 @app.post("/api/novels/{nid}/reopen")
-def reopen_novel(nid: str):
+def reopen_novel(request: Request, nid: str):
+    uid = request.state.user_id
     """重新打开已完结的小说，恢复可编辑状态（重算状态）。"""
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
 
@@ -836,17 +976,18 @@ def reopen_novel(nid: str):
         all_done = bool(chs) and all(c.get("content") for c in chs)
         m["status"] = "done" if all_done else ("generating" if any(c.get("content") for c in chs) else "outlined")
 
-    return {"novel": storage.update_novel(nid, mut)}
+    return {"novel": storage.update_novel(nid, uid, mut)}
 
 
 @app.post("/api/novels/{nid}/prepare")
-def prepare_novel(nid: str):
+def prepare_novel(request: Request, nid: str):
+    uid = request.state.user_id
     """生成故事梗概 + 世界观 + 章节大纲。"""
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
     _ensure_not_finished(n)
-    ctx = _ctx(n)
+    ctx = _ctx(n, uid)
     try:
         # 1. 若有参考文本，先分析风格并合并
         if n.get("reference_text"):
@@ -868,16 +1009,17 @@ def prepare_novel(nid: str):
             m["style"] = n.get("style", m.get("style", ""))
             m["status"] = "outlined"
             m["progress_summary"] = ""
-        n = storage.update_novel(nid, mut)
+        n = storage.update_novel(nid, uid, mut)
         return {"novel": n}
     except Exception as e:  # noqa: BLE001
         raise _err(e)
 
 
 @app.put("/api/novels/{nid}/chapter/{index}")
-def update_one_chapter(nid: str, index: int, body: dict):
+def update_one_chapter(request: Request, nid: str, index: int, body: dict):
+    uid = request.state.user_id
     """编辑单章内容（标题/概要/正文）。"""
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
     _ensure_not_finished(n)
@@ -886,7 +1028,7 @@ def update_one_chapter(nid: str, index: int, body: dict):
     if index < 1 or index > len(n["chapters"]):
         raise HTTPException(400, f"章节序号越界（1~{len(n['chapters'])}）")
     # 快照旧版本
-    storage.snapshot_chapter(nid, index, "manual")
+    storage.snapshot_chapter(nid, index, "manual", user_id=uid)
     editable = {"title", "summary", "content"}
     def mut(m):
         for ch in m["chapters"]:
@@ -897,14 +1039,15 @@ def update_one_chapter(nid: str, index: int, body: dict):
                 if "content" in body:
                     ch["word_count"] = generators._count_chinese(body["content"])
                 break
-    n = storage.update_novel(nid, mut)
+    n = storage.update_novel(nid, uid, mut)
     return {"novel": n}
 
 
 @app.post("/api/novels/{nid}/chapter/{index}/summary")
-def summarize_chapter(nid: str, index: int):
+def summarize_chapter(request: Request, nid: str, index: int):
+    uid = request.state.user_id
     """为指定章节单独生成摘要，保存到章节 summary 字段。"""
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
     _ensure_not_finished(n)
@@ -914,7 +1057,7 @@ def summarize_chapter(nid: str, index: int):
     chapter = next((c for c in chapters if c.get("index") == index), None)
     if not chapter or not chapter.get("content"):
         raise HTTPException(400, "该章节暂无正文，无法生成摘要")
-    ctx = _ctx(n)
+    ctx = _ctx(n, uid)
     try:
         summary = generators.summarize_chapter_content(ctx, chapter["content"], index)
     except AIClientError as e:
@@ -928,14 +1071,15 @@ def summarize_chapter(nid: str, index: int):
                 ch["summary"] = summary
                 break
 
-    storage.update_novel(nid, mut)
-    return {"novel": storage.get_novel(nid), "summary": summary}
+    storage.update_novel(nid, uid, mut)
+    return {"novel": storage.get_novel(nid, uid), "summary": summary}
 
 
 @app.delete("/api/novels/{nid}/chapter/{index}")
-def delete_one_chapter(nid: str, index: int):
+def delete_one_chapter(request: Request, nid: str, index: int):
+    uid = request.state.user_id
     """删除指定章节，后续章节重新编号。"""
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
     _ensure_not_finished(n)
@@ -955,11 +1099,12 @@ def delete_one_chapter(nid: str, index: int):
         all_done = bool(chs) and all(c.get("content") for c in chs)
         m["status"] = "done" if all_done else ("generating" if any(c.get("content") for c in chs) else "outlined")
 
-    storage.update_novel(nid, mut)
-    return {"novel": storage.get_novel(nid)}
+    storage.update_novel(nid, uid, mut)
+    return {"novel": storage.get_novel(nid, uid)}
 
 
 def _renumber_progress(progress_summary, deleted_index, remain_count):
+    uid = request.state.user_id
     """删除章节后重写前情提要的章节编号。
 
     - 删除被删章节的摘要条目
@@ -984,9 +1129,10 @@ def _renumber_progress(progress_summary, deleted_index, remain_count):
 
 
 @app.post("/api/novels/{nid}/chapter/{index}")
-def generate_one_chapter(nid: str, index: int):
+def generate_one_chapter(request: Request, nid: str, index: int):
+    uid = request.state.user_id
     """生成单章，并更新前情提要。"""
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
     _ensure_not_finished(n)
@@ -995,8 +1141,8 @@ def generate_one_chapter(nid: str, index: int):
     if index < 1 or index > len(n["chapters"]):
         raise HTTPException(400, f"章节序号越界（1~{len(n['chapters'])}）")
     # 生成前快照旧版本
-    storage.snapshot_chapter(nid, index, source="ai")
-    ctx = _ctx(n)
+    storage.snapshot_chapter(nid, index, source="ai", user_id=uid)
+    ctx = _ctx(n, uid)
     try:
         chapter, csummary = generators.generate_chapter(ctx, n, index)
 
@@ -1012,13 +1158,13 @@ def generate_one_chapter(nid: str, index: int):
             # 全部章节生成完成则标记 done
             all_done = all(ch.get("content") for ch in m["chapters"])
             m["status"] = "done" if all_done else "generating"
-        n = storage.update_novel(nid, mut)
+        n = storage.update_novel(nid, uid, mut)
 
         # 前情提要过长时浓缩（异步判断，超过 3000 字触发）
         if len(n.get("progress_summary", "")) > 3000:
             try:
                 condensed = generators.condense_progress(ctx, n["progress_summary"])
-                storage.update_novel(nid, lambda m: m.update({"progress_summary": condensed}))
+                storage.update_novel(nid, uid, lambda m: m.update({"progress_summary": condensed}))
             except AIClientError:
                 pass
         return {"chapter": chapter, "summary": csummary}
@@ -1029,7 +1175,7 @@ def generate_one_chapter(nid: str, index: int):
 @app.post("/api/novels/{nid}/chapter/{index}/stream")
 async def stream_one_chapter(nid: str, index: int):
     """流式生成单章（SSE）：实时推送正文增量，边生成边显示。"""
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
     _ensure_not_finished(n)
@@ -1038,8 +1184,8 @@ async def stream_one_chapter(nid: str, index: int):
     if index < 1 or index > len(n["chapters"]):
         raise HTTPException(400, f"章节序号越界（1~{len(n['chapters'])}）")
     # 生成前快照旧版本
-    storage.snapshot_chapter(nid, index, source="ai")
-    ctx = _ctx(n)
+    storage.snapshot_chapter(nid, index, source="ai", user_id=uid)
+    ctx = _ctx(n, uid)
 
     def sse(event: dict) -> str:
         return "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
@@ -1067,7 +1213,7 @@ async def stream_one_chapter(nid: str, index: int):
             all_done = all(ch.get("content") for ch in m["chapters"])
             m["status"] = "done" if all_done else "generating"
 
-        storage.update_novel(nid, mut)
+        storage.update_novel(nid, uid, mut)
 
     def _persist_summary(summary: str):
         if not summary:
@@ -1078,7 +1224,7 @@ async def stream_one_chapter(nid: str, index: int):
             m["progress_summary"] = generators.replace_progress_entry(
                 m.get("progress_summary", ""), index, summary)
 
-        storage.update_novel(nid, mut)
+        storage.update_novel(nid, uid, mut)
 
     def _producer():
         """在后台线程中运行同步的 stream_chapter，每产出一个事件就推入队列。"""
@@ -1107,12 +1253,12 @@ async def stream_one_chapter(nid: str, index: int):
                 # 主动让出控制权，确保 uvicorn 立即 flush
                 await asyncio.sleep(0)
 
-            n2 = storage.get_novel(nid)
+            n2 = storage.get_novel(nid, uid)
             if n2 and len(n2.get("progress_summary", "")) > 3000:
                 try:
                     condensed = generators.condense_progress(ctx, n2["progress_summary"])
-                    storage.update_novel(nid, lambda m: m.update({"progress_summary": condensed}))
-                    n2 = storage.get_novel(nid)
+                    storage.update_novel(nid, uid, lambda m: m.update({"progress_summary": condensed}))
+                    n2 = storage.get_novel(nid, uid)
                 except AIClientError:
                     pass
             yield sse({"type": "done", "novel": n2})
@@ -1136,7 +1282,7 @@ async def improv_stream(nid: str, body: dict):
     regenerate_index 存在时：重新生成该章（替换正文与写作指引，保留标题），
     引用章节只允许取该章之前的内容，避免把原章节内容发给 AI。
     """
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
     _ensure_not_finished(n)
@@ -1147,7 +1293,7 @@ async def improv_stream(nid: str, body: dict):
     context_chapters = (body or {}).get("context_chapters", [])
     if not isinstance(context_chapters, list):
         context_chapters = []
-    ctx = _ctx(n)
+    ctx = _ctx(n, uid)
 
     regenerate_index = (body or {}).get("regenerate_index")
     if regenerate_index is not None:
@@ -1158,7 +1304,7 @@ async def improv_stream(nid: str, body: dict):
         if index < 1 or index > len(n.get("chapters", [])):
             raise HTTPException(400, f"章节序号越界（1~{len(n.get('chapters', []))}）")
         # 重新生成前快照旧版本
-        storage.snapshot_chapter(nid, index, source="ai")
+        storage.snapshot_chapter(nid, index, source="ai", user_id=uid)
         # 重新生成时只允许引用本章之前的章节（防止把本章/后文内容带入）
         context_chapters = [
             r for r in context_chapters
@@ -1191,7 +1337,7 @@ async def improv_stream(nid: str, body: dict):
                         break
                 m["status"] = "generating"
 
-            storage.update_novel(nid, mut)
+            storage.update_novel(nid, uid, mut)
             return
 
         chapter = {
@@ -1207,7 +1353,7 @@ async def improv_stream(nid: str, body: dict):
             m["chapters"].append(chapter)
             m["status"] = "generating"
 
-        storage.update_novel(nid, mut)
+        storage.update_novel(nid, uid, mut)
 
     def _persist_summary(summary: str):
         if not summary:
@@ -1217,7 +1363,7 @@ async def improv_stream(nid: str, body: dict):
             m["progress_summary"] = generators.replace_progress_entry(
                 m.get("progress_summary", ""), index, summary)
 
-        storage.update_novel(nid, mut)
+        storage.update_novel(nid, uid, mut)
 
     def _producer():
         try:
@@ -1243,12 +1389,12 @@ async def improv_stream(nid: str, body: dict):
                 yield sse(item)
                 await asyncio.sleep(0)
 
-            n2 = storage.get_novel(nid)
+            n2 = storage.get_novel(nid, uid)
             if n2 and len(n2.get("progress_summary", "")) > 3000:
                 try:
                     condensed = generators.condense_progress(ctx, n2["progress_summary"])
-                    storage.update_novel(nid, lambda m: m.update({"progress_summary": condensed}))
-                    n2 = storage.get_novel(nid)
+                    storage.update_novel(nid, uid, lambda m: m.update({"progress_summary": condensed}))
+                    n2 = storage.get_novel(nid, uid)
                 except AIClientError:
                     pass
             yield sse({"type": "done", "novel": n2})
@@ -1278,8 +1424,9 @@ async def expand_fragment(nid: str, index: int, body: dict):
 
 
 def _fragment_sse(nid: str, index: int, body: dict, action: str):
+    uid = request.state.user_id
     """润色/扩写片段的通用 SSE 处理。"""
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
     _ensure_not_finished(n)
@@ -1291,7 +1438,7 @@ def _fragment_sse(nid: str, index: int, body: dict, action: str):
     chapters = n.get("chapters", [])
     if index < 1 or index > len(chapters):
         raise HTTPException(400, f"章节序号越界（1~{len(chapters)}）")
-    ctx = _ctx(n)
+    ctx = _ctx(n, uid)
 
     stream_fn = (generators.polish_fragment_stream if action == "polish"
                  else generators.expand_fragment_stream)
@@ -1349,7 +1496,7 @@ async def dialog_stream(nid: str, body: dict):
     重生成场景：前端把历史截断到被编辑消息之前，把编辑后的内容作为 text 传入，
     后端用新历史生成，并在保存时替换（而非追加）该历史之后的旧消息。
     """
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
     _ensure_not_finished(n)
@@ -1366,7 +1513,7 @@ async def dialog_stream(nid: str, body: dict):
         word_limit = 50
     if word_limit > 5000:
         word_limit = 5000
-    ctx = _ctx(n)
+    ctx = _ctx(n, uid)
     history = (body or {}).get("history")
     if history is None:
         history = n.get("dialog_messages", []) or []
@@ -1417,7 +1564,7 @@ async def dialog_stream(nid: str, body: dict):
                     # 控制历史长度，避免无限膨胀（保留最近 200 条）
                     m["dialog_messages"] = msgs[-200:]
                     m["status"] = "generating"
-                storage.update_novel(nid, mut)
+                storage.update_novel(nid, uid, mut)
 
             yield sse({"type": "done", "content": content})
         except Exception as e:  # noqa: BLE001
@@ -1431,12 +1578,13 @@ async def dialog_stream(nid: str, body: dict):
 
 
 @app.post("/api/novels/{nid}/dialog/update")
-def update_dialog_message(nid: str, body: dict):
+def update_dialog_message(request: Request, nid: str, body: dict):
+    uid = request.state.user_id
     """直接更新某条对话消息内容（不触发 AI 重新生成）。
 
     body: {index, content}  index 从 0 起。
     """
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
     _ensure_not_finished(n)
@@ -1458,8 +1606,8 @@ def update_dialog_message(nid: str, body: dict):
             ms[index]["content"] = content.strip()
         m["dialog_messages"] = ms
 
-    storage.update_novel(nid, mut)
-    return {"novel": storage.get_novel(nid)}
+    storage.update_novel(nid, uid, mut)
+    return {"novel": storage.get_novel(nid, uid)}
 
 
 @app.post("/api/novels/{nid}/dialog/chapter")
@@ -1473,7 +1621,7 @@ async def dialog_to_chapter(nid: str, body: dict):
       up_to  结束索引（从 0 起，含该消息），取前 up_to+1 条消息中的 AI 内容。
       title  可选章节标题，缺省用「第N章」。
     """
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
     _ensure_not_finished(n)
@@ -1495,7 +1643,7 @@ async def dialog_to_chapter(nid: str, body: dict):
     if not content:
         raise HTTPException(400, "该段对话还没有 AI 生成的内容，无法生成章节")
 
-    ctx = _ctx(n)
+    ctx = _ctx(n, uid)
     chapter_index = len(n.get("chapters", [])) + 1
 
     # 提取摘要（仅此步调用 AI）
@@ -1527,7 +1675,7 @@ async def dialog_to_chapter(nid: str, body: dict):
                 m.get("progress_summary", ""), chapter_index, summary)
         m["status"] = "generating"
 
-    storage.update_novel(nid, mut)
+    storage.update_novel(nid, uid, mut)
 
     return {"chapter_index": chapter_index, "title": chapter["title"],
             "content": content, "summary": summary, "word_count": chapter["word_count"]}
@@ -1536,31 +1684,34 @@ async def dialog_to_chapter(nid: str, body: dict):
 # ================= 章节版本历史 =================
 
 @app.get("/api/novels/{nid}/chapter/{index}/history")
-def get_chapter_history(nid: str, index: int):
+def get_chapter_history(request: Request, nid: str, index: int):
+    uid = request.state.user_id
     """返回某章节的历史版本列表。"""
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
-    versions = storage.list_chapter_versions(nid, index)
+    versions = storage.list_chapter_versions(nid, index, uid)
     return {"versions": versions}
 
 
 @app.get("/api/novels/{nid}/chapter/{index}/history/{vid}")
-def get_chapter_version_detail(nid: str, index: int, vid: str):
+def get_chapter_version_detail(request: Request, nid: str, index: int, vid: str):
+    uid = request.state.user_id
     """返回单个历史版本详情。"""
-    v = storage.get_chapter_version(vid)
+    v = storage.get_chapter_version(vid, uid)
     if not v or v["novel_id"] != nid or v["chapter_idx"] != index:
         raise HTTPException(404, "版本不存在")
     return {"version": v}
 
 
 @app.post("/api/novels/{nid}/chapter/{index}/revert")
-def revert_chapter(nid: str, index: int, body: dict):
+def revert_chapter(request: Request, nid: str, index: int, body: dict):
+    uid = request.state.user_id
     """回退到指定历史版本。body: {version_id}"""
     vid = (body or {}).get("version_id", "")
     if not vid:
         raise HTTPException(400, "缺少 version_id")
-    v = storage.get_chapter_version(vid)
+    v = storage.get_chapter_version(vid, uid)
     if not v or v["novel_id"] != nid or v["chapter_idx"] != index:
         raise HTTPException(404, "版本不存在")
 
@@ -1573,7 +1724,7 @@ def revert_chapter(nid: str, index: int, body: dict):
                 ch["word_count"] = v["word_count"]
                 break
 
-    n = storage.update_novel(nid, mut)
+    n = storage.update_novel(nid, uid, mut)
     if not n:
         raise HTTPException(404, "小说不存在")
     return {"novel": n}
@@ -1584,15 +1735,15 @@ def revert_chapter(nid: str, index: int, body: dict):
 @app.post("/api/novels/{nid}/rewrite/stream")
 async def rewrite_stream(nid: str, body: dict):
     """改写模式：按任务要求流式改写某章原文。body: {index}。"""
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
     _ensure_not_finished(n)
     index = int((body or {}).get("index", 0))
     if index < 1 or index > len(n.get("chapters", [])):
         raise HTTPException(400, f"章节序号越界（1~{len(n.get('chapters', []))}）")
-    storage.snapshot_chapter(nid, index, source="ai")
-    ctx = _ctx(n)
+    storage.snapshot_chapter(nid, index, source="ai", user_id=uid)
+    ctx = _ctx(n, uid)
 
     def sse(event: dict) -> str:
         return "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
@@ -1607,7 +1758,7 @@ async def rewrite_stream(nid: str, body: dict):
                 if ch["index"] == index:
                     m["chapters"][i] = {**ch, "content": content, "word_count": word_count}
                     break
-        storage.update_novel(nid, mut)
+        storage.update_novel(nid, uid, mut)
 
     def _persist_summary(summary: str):
         if not summary:
@@ -1617,7 +1768,7 @@ async def rewrite_stream(nid: str, body: dict):
                 if ch["index"] == index:
                     ch["summary"] = summary
                     break
-        storage.update_novel(nid, mut)
+        storage.update_novel(nid, uid, mut)
 
     def _producer():
         try:
@@ -1642,7 +1793,7 @@ async def rewrite_stream(nid: str, body: dict):
                     break
                 yield sse(item)
                 await asyncio.sleep(0)
-            n2 = storage.get_novel(nid)
+            n2 = storage.get_novel(nid, uid)
             yield sse({"type": "done", "novel": n2})
             if "err" in stream_error:
                 yield sse({"type": "error", "message": str(_err(stream_error["err"]).detail)})
@@ -1658,7 +1809,7 @@ async def rewrite_stream(nid: str, body: dict):
 @app.post("/api/novels/{nid}/continue/stream")
 async def continue_stream(nid: str, body: dict):
     """续写模式：以导入原文为前情流式生成下一章。body: {instruction}。"""
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
     _ensure_not_finished(n)
@@ -1666,7 +1817,7 @@ async def continue_stream(nid: str, body: dict):
     if not instruction:
         raise HTTPException(400, "请填写本章续写要求")
     index = len(n.get("chapters", [])) + 1
-    ctx = _ctx(n)
+    ctx = _ctx(n, uid)
 
     def sse(event: dict) -> str:
         return "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
@@ -1687,7 +1838,7 @@ async def continue_stream(nid: str, body: dict):
         def mut(m):
             m["chapters"].append(chapter)
             m["status"] = "generating"
-        storage.update_novel(nid, mut)
+        storage.update_novel(nid, uid, mut)
 
     def _persist_summary(summary: str):
         if not summary:
@@ -1697,7 +1848,7 @@ async def continue_stream(nid: str, body: dict):
                 if ch["index"] == index:
                     ch["summary"] = summary
                     break
-        storage.update_novel(nid, mut)
+        storage.update_novel(nid, uid, mut)
 
     def _producer():
         try:
@@ -1722,7 +1873,7 @@ async def continue_stream(nid: str, body: dict):
                     break
                 yield sse(item)
                 await asyncio.sleep(0)
-            n2 = storage.get_novel(nid)
+            n2 = storage.get_novel(nid, uid)
             yield sse({"type": "done", "novel": n2})
             if "err" in stream_error:
                 yield sse({"type": "error", "message": str(_err(stream_error["err"]).detail)})
@@ -1738,10 +1889,10 @@ async def continue_stream(nid: str, body: dict):
 @app.post("/api/novels/{nid}/analyze")
 async def analyze_source(nid: str):
     """原著结构化拆解（SSE）：后台调用 LLM 提取故事档案，完成后持久化并返回。"""
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
-    ctx = _ctx(n)
+    ctx = _ctx(n, uid)
 
     def sse(event: dict) -> str:
         return "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
@@ -1759,7 +1910,7 @@ async def analyze_source(nid: str):
                     {"type": "progress", "step": step, "total": total, "message": msg}))
             def mut(m):
                 m["structured_profile"] = json.dumps(profile, ensure_ascii=False)
-            storage.update_novel(nid, mut)
+            storage.update_novel(nid, uid, mut)
             q.put({"type": "profile", "profile": profile})
         except Exception as e:  # noqa: BLE001
             q.put({"type": "error", "message": str(_err(e).detail)})
@@ -1785,7 +1936,7 @@ async def analyze_source(nid: str):
                     break
                 yield sse(item)
                 await asyncio.sleep(0)
-            n2 = storage.get_novel(nid)
+            n2 = storage.get_novel(nid, uid)
             yield sse({"type": "done", "novel": n2})
         except Exception as e:  # noqa: BLE001
             yield sse({"type": "error", "message": str(_err(e).detail)})
@@ -1804,7 +1955,7 @@ async def analyze_source_text(body: dict):
         raise HTTPException(400, "请先导入原文")
     n = {"source_text": source_text,
          "text_model_id": (body or {}).get("text_model_id", "")}
-    ctx = _ctx(n)
+    ctx = _ctx(n, uid)
 
     def sse(event: dict) -> str:
         return "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
@@ -1857,9 +2008,10 @@ async def analyze_source_text(body: dict):
 
 
 @app.post("/api/novels/{nid}/resplit")
-def resplit_source(nid: str):
+def resplit_source(request: Request, nid: str):
+    uid = request.state.user_id
     """改写模式：按 source_text 重新切分章节（丢弃已有改写结果）。"""
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
     _ensure_not_finished(n)
@@ -1871,16 +2023,17 @@ def resplit_source(nid: str):
 
     def mut(m):
         m["chapters"] = chapters
-    n = storage.update_novel(nid, mut)
+    n = storage.update_novel(nid, uid, mut)
     if not n:
         raise HTTPException(404, "小说不存在")
     return {"novel": n}
 
 
 @app.get("/api/novels/{nid}/export")
-def export_novel(nid: str, format: str = "md"):
+def export_novel(request: Request, nid: str, format: str = "md"):
+    uid = request.state.user_id
     """导出小说，支持 md / txt / epub 格式。"""
-    n = storage.get_novel(nid)
+    n = storage.get_novel(nid, uid)
     if not n:
         raise HTTPException(404, "小说不存在")
 
@@ -1900,6 +2053,7 @@ def export_novel(nid: str, format: str = "md"):
 
 
 def _export_md(n, title, ts):
+    uid = request.state.user_id
     lines = [f"# {title}", ""]
     if n.get("summary"):
         lines += ["## 故事梗概", n["summary"], ""]
@@ -1920,6 +2074,7 @@ def _export_md(n, title, ts):
 
 
 def _strip_markdown(text):
+    uid = request.state.user_id
     """去掉 Markdown 标记，保留纯文本。"""
     import re as _re
     # 标题
@@ -1935,6 +2090,7 @@ def _strip_markdown(text):
 
 
 def _export_txt(n, title, ts):
+    uid = request.state.user_id
     lines = [title, "=" * len(title), ""]
     if n.get("summary"):
         lines += ["【故事梗概】", n["summary"], ""]
@@ -1956,6 +2112,7 @@ def _export_txt(n, title, ts):
 
 
 def _escape_xml(s):
+    uid = request.state.user_id
     """转义 XML 特殊字符。"""
     s = s.replace("&", "&amp;")
     s = s.replace("<", "&lt;")
@@ -1966,6 +2123,7 @@ def _escape_xml(s):
 
 
 def _export_epub(n, title, ts):
+    uid = request.state.user_id
     """构造 EPUB 2.0 格式的 ZIP 文件（纯 Python，无外部依赖）。"""
     import zipfile
     import io
@@ -2026,6 +2184,7 @@ p { text-indent: 2em; margin: 0.5em 0; }
 
 
 def _build_intro_xhtml(n, title):
+    uid = request.state.user_id
     parts = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">',
@@ -2050,6 +2209,7 @@ def _build_intro_xhtml(n, title):
 
 
 def _build_chapter_xhtml(ch):
+    uid = request.state.user_id
     title = ch.get("title", "").strip() or f"第{ch['index']}章"
     parts = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -2070,6 +2230,7 @@ def _build_chapter_xhtml(ch):
 
 
 def _build_opf(n, title, chapter_files):
+    uid = request.state.user_id
     uid = f"urn:noveltale:{n.get('id', 'unknown')}"
     items = [
         f'    <item id="intro" href="intro.xhtml" media-type="application/xhtml+xml"/>',
@@ -2104,6 +2265,7 @@ def _build_opf(n, title, chapter_files):
 
 
 def _build_ncx(n, title, chapter_files):
+    uid = request.state.user_id
     uid = f"urn:noveltale:{n.get('id', 'unknown')}"
     nav_points = [
         f'''    <navPoint id="intro" playOrder="1">

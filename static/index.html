@@ -19,8 +19,10 @@
     </nav>
     <span class="spacer"></span>
     <button class="btn" id="btn-providers" onclick="nav('#/providers')">配置</button>
+    <button class="btn" id="btn-users" onclick="nav('#/users')" style="display:none">用户管理</button>
+    <span class="user-badge" id="user-badge" style="display:none"></span>
     <button class="btn theme-toggle" id="btn-theme" onclick="toggleTheme()" title="切换夜间模式">🌙</button>
-    <button class="btn" id="btn-logout" onclick="logout()" style="display:none">退出登录</button>
+    <button class="btn" id="btn-logout" onclick="logout()" style="display:none">退出</button>
   </header>
 
   <main class="container">
@@ -28,10 +30,38 @@
     <section id="view-login" class="view">
       <div class="login-card">
         <h2>登录</h2>
-        <p class="hint" id="login-hint">请输入访问密码</p>
-        <input id="login-password" type="password" placeholder="访问密码" autocomplete="current-password">
+        <p class="hint" id="login-hint">请输入用户名和密码</p>
+        <input id="login-username" type="text" placeholder="用户名" autocomplete="username">
+        <input id="login-password" type="password" placeholder="密码" autocomplete="current-password">
         <button class="btn primary" onclick="doLogin()" id="login-btn">登录</button>
       </div>
+      <div class="login-card" id="register-card" style="display:none">
+        <h2>创建管理员</h2>
+        <p class="hint">首次使用，请创建管理员账号</p>
+        <input id="reg-username" type="text" placeholder="用户名" autocomplete="username">
+        <input id="reg-password" type="password" placeholder="密码（至少4位）" autocomplete="new-password">
+        <input id="reg-password2" type="password" placeholder="确认密码" autocomplete="new-password">
+        <button class="btn primary" onclick="doRegister()">创建并登录</button>
+      </div>
+    </section>
+
+    <!-- ============ 用户管理视图 ============ -->
+    <section id="view-users" class="view">
+      <div class="page-head">
+        <h2>用户管理</h2>
+      </div>
+      <div class="card" style="margin-bottom:1.5rem">
+        <h3>创建用户</h3>
+        <div style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:end">
+          <div><label>用户名</label><input id="new-username" type="text" placeholder="用户名"></div>
+          <div><label>密码</label><input id="new-password" type="password" placeholder="密码"></div>
+          <div><label>角色</label>
+            <select id="new-role"><option value="user">普通用户</option><option value="admin">管理员</option></select>
+          </div>
+          <button class="btn primary" onclick="createUser()">创建</button>
+        </div>
+      </div>
+      <div id="user-list"></div>
     </section>
 
     <!-- ============ 配置（视图） ============ -->
