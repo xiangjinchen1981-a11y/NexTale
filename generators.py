@@ -902,7 +902,9 @@ def _extract_json(text):
     """从模型输出中提取 JSON 对象（剥掉代码围栏、修复常见格式问题）。"""
     text = (text or "").strip()
     if not text:
-        raise AIClientError("模型未返回内容")
+        raise AIClientError(
+            "模型未返回任何内容（常见于推理类模型把输出额度全部用于思考过程）。"
+            "请在「API 配置」中为该模型设置更大的 max_tokens（如 32768）后重试")
 
     candidates = [text]
 
@@ -910,6 +912,13 @@ def _extract_json(text):
     m = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.S)
     if m:
         candidates.append(m.group(1).strip())
+
+    # 1b. 输出被截断时围栏可能未闭合：剥掉开头围栏行后再尝试解析
+    m_open = re.match(r"\s*```(?:json)?\s*\n?", text)
+    if m_open:
+        stripped = re.sub(r"```\s*$", "", text[m_open.end():]).strip()
+        if stripped:
+            candidates.append(stripped)
 
     # 2. 用括号配对提取首个 { 到匹配的 }（比 rfind 更可靠）
     start = text.find("{")
@@ -1054,6 +1063,20 @@ def _load_profile(novel):
         return None
 
 
+def _norm_text(v):
+    """把模型偶尔输出的数组/对象字段归一化为可读文本（提示词要求字符串，
+    但模型有时会返回 list/dict，直接拼接会得到 repr 或引发 AttributeError）。"""
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v.strip()
+    if isinstance(v, list):
+        return "；".join(x for x in (_norm_text(i) for i in v) if x)
+    if isinstance(v, dict):
+        return "；".join(f"{k}：{_norm_text(x)}" for k, x in v.items())
+    return str(v).strip()
+
+
 def _format_profile(profile):
     """把结构化故事档案格式化为续写 prompt 的上下文块（空档案返回空串）。"""
     if not isinstance(profile, dict):
@@ -1067,12 +1090,12 @@ def _format_profile(profile):
             if not isinstance(c, dict):
                 continue
             fields = [
-                f"性格：{c.get('core_personality', '')}",
-                f"说话：{c.get('speaking_style', '')}",
-                f"经历：{c.get('key_history', '')}",
-                f"关系：{c.get('relationship', '')}",
-                f"现状：{c.get('current_state', '')}",
-                f"禁忌：{c.get('taboo', '')}",
+                f"性格：{_norm_text(c.get('core_personality'))}",
+                f"说话：{_norm_text(c.get('speaking_style'))}",
+                f"经历：{_norm_text(c.get('key_history'))}",
+                f"关系：{_norm_text(c.get('relationship'))}",
+                f"现状：{_norm_text(c.get('current_state'))}",
+                f"禁忌：{_norm_text(c.get('taboo'))}",
             ]
             lines.append(f"· {c.get('name', '?')}｜" + "；".join(
                 f for f in fields if f.split('：', 1)[-1].strip()))
@@ -1083,30 +1106,29 @@ def _format_profile(profile):
         ws_lines = []
         for k, label in [("world_rules", "世界规则"), ("geography", "重要地域"),
                          ("forces", "各大势力"), ("noun_glossary", "专有名词")]:
-            if ws.get(k):
-                ws_lines.append(f"{label}：{ws[k]}")
+            v = _norm_text(ws.get(k))
+            if v:
+                ws_lines.append(f"{label}：{v}")
         if ws_lines:
             parts.append("【世界观设定】\n" + "\n".join(ws_lines))
 
     mf = profile.get("main_frame") or {}
     if isinstance(mf, dict):
-        fg = mf.get("foreshadowing_list") or []
-        if isinstance(fg, list):
-            fg_txt = "；".join(str(x) for x in fg)
-        else:
-            fg_txt = str(fg)
+        fg_txt = _norm_text(mf.get("foreshadowing_list"))
         mf_lines = [
-            f"核心主题：{mf.get('core_theme', '')}",
-            f"主角长期目标：{mf.get('protagonist_goal', '')}",
-            f"核心矛盾：{mf.get('main_conflict', '')}",
-            f"文风基调：{mf.get('story_tone', '')}",
+            f"核心主题：{_norm_text(mf.get('core_theme'))}",
+            f"主角长期目标：{_norm_text(mf.get('protagonist_goal'))}",
+            f"核心矛盾：{_norm_text(mf.get('main_conflict'))}",
+            f"文风基调：{_norm_text(mf.get('story_tone'))}",
             f"待回收伏笔：{fg_txt}",
         ]
         parts.append("【主线框架】\n" + "\n".join(mf_lines))
 
     sm = profile.get("summary") or {}
-    if isinstance(sm, dict) and sm.get("full_outline"):
-        parts.append("【全书脉络摘要】\n" + str(sm["full_outline"]))
+    if isinstance(sm, dict):
+        outline = _norm_text(sm.get("full_outline"))
+        if outline:
+            parts.append("【全书脉络摘要】\n" + outline)
 
     return "\n\n".join(parts)
 
@@ -1168,38 +1190,39 @@ def _merge_profiles(partials):
             dst = char_by_name[name]
             for k in ["core_personality", "speaking_style", "key_history",
                       "relationship", "current_state", "taboo"]:
-                v = (c.get(k) or "").strip()
+                v = _norm_text(c.get(k))
                 if v and v not in dst[k]:
                     dst[k] = (dst[k] + "；" + v) if dst[k] else v
         # 世界观：各字段拼接（去重）
         w = p.get("world_setting") or {}
         for k in ["world_rules", "geography", "forces", "noun_glossary"]:
-            v = (w.get(k) or "").strip()
+            v = _norm_text(w.get(k))
             if v and v not in ws.get(k, ""):
                 ws[k] = (ws[k] + "；" + v) if ws.get(k) else v
         # 主线框架：核心字段取第一个非空（全书级），伏笔拼接去重
         m = p.get("main_frame") or {}
         for k in ["core_theme", "protagonist_goal", "main_conflict", "story_tone"]:
-            v = (m.get(k) or "").strip()
+            v = _norm_text(m.get(k))
             if v and not mf.get(k):
                 mf[k] = v
         fl = m.get("foreshadowing_list") or []
         if isinstance(fl, list):
             for x in fl:
-                s = str(x).strip()
+                s = _norm_text(x)
                 if s and s not in fg_seen:
                     fg_seen.add(s)
                     fg.append(s)
         # 摘要：outline 拼接，章节摘要去重
         s = p.get("summary") or {}
         if isinstance(s, dict):
-            if s.get("full_outline"):
-                outlines.append(s["full_outline"].strip())
+            outline = _norm_text(s.get("full_outline"))
+            if outline:
+                outlines.append(outline)
             for cs in (s.get("chapter_summaries") or []):
                 if not isinstance(cs, dict):
                     continue
-                key = (cs.get("chapter") or "").strip()
-                brief = (cs.get("brief") or "").strip()
+                key = _norm_text(cs.get("chapter"))
+                brief = _norm_text(cs.get("brief"))
                 if brief and key not in ch_seen:
                     ch_seen.add(key)
                     ch_sums.append({"chapter": key, "brief": brief})
@@ -1224,8 +1247,9 @@ def analyze_source_profile(context, novel, on_progress=None):
     source = (novel.get("source_text") or "").strip()
     if not source:
         raise AIClientError("尚未导入原文，无法拆解")
-    # 拆解输出 JSON 较大（人物+世界观+主线+摘要），预留充足输出余量
-    max_tokens = max(int(mcfg.get("max_tokens") or 16000), 16000)
+    # 拆解输出 JSON 较大（人物+世界观+主线+摘要）；推理类模型的思考过程也计入
+    # max_tokens 额度，额度过小会导致结果被截断甚至返回空内容，默认预留 32768
+    max_tokens = int(mcfg.get("max_tokens") or 32768)
     limit = _context_limit(context, mcfg, max_tokens)
     # 每块原文上限（字符）：留出提示词 + 输出 token 的余量；未配置上下文时用保守默认
     block_chars = max(limit - 3000, 6000) if limit else 50000
@@ -1251,7 +1275,8 @@ def analyze_source_profile(context, novel, on_progress=None):
         prompt = get_prompt(context, "analyze_source_partial").format(block=blk)
         content, _ = chat_text(
             provider, model, _messages(context, prompt),
-            temperature=0.3, max_tokens=max_tokens, name=f"原著分块拆解 {i}/{total}")
+            temperature=0.3, max_tokens=max_tokens, name=f"原著分块拆解 {i}/{total}",
+            user_id=_uid(context))
         partials.append(_extract_json_safe(content))
     if on_progress:
         on_progress(total, total, "正在合并各块档案…")

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>织叙-NexTale</title>
-  <link rel="stylesheet" href="style.css?v=20260827c">
+  <link rel="stylesheet" href="style.css?v=20260828a">
 </head>
 <body>
   <header class="topbar">
@@ -20,9 +20,13 @@
     <span class="spacer"></span>
     <button class="btn" id="btn-providers" onclick="nav('#/providers')">配置</button>
     <button class="btn" id="btn-users" onclick="nav('#/users')" style="display:none">用户管理</button>
-    <span class="user-badge" id="user-badge" style="display:none"></span>
     <button class="btn theme-toggle" id="btn-theme" onclick="toggleTheme()" title="切换夜间模式">🌙</button>
-    <button class="btn" id="btn-logout" onclick="logout()" style="display:none">退出</button>
+    <div class="user-dropdown" id="user-dropdown" style="display:none">
+      <button class="user-badge" id="user-badge" onclick="toggleUserDropdown()"></button>
+      <div class="user-dropdown-menu" id="user-dropdown-menu">
+        <button class="user-dropdown-item" onclick="logout()">退出登录</button>
+      </div>
+    </div>
   </header>
 
   <main class="container">
@@ -411,6 +415,7 @@
 
       <div class="step-indicator">
         <span class="step" id="step-dot-1" onclick="goStep(1)">① 基本信息</span>
+        <span class="step" id="step-dot-analyze" onclick="goStep('analyze')" style="display:none">② AI 原著拆解</span>
         <span class="step" id="step-dot-2" onclick="goStep(2)">② 角色设定</span>
         <span class="step" id="step-dot-3" onclick="goStep(3)">③ 模型与提示词</span>
       </div>
@@ -451,7 +456,7 @@
           <h4>导入已有小说原文</h4>
           <p class="hint">粘贴已有小说的全文，作为「改写」的素材或「续写」的前情。导入后系统会自动按章节（或每章字数）切分。</p>
           <label>原文内容
-            <textarea id="n-source" rows="10" placeholder="粘贴已有小说的全文…（续写模式粘贴完成后会自动拆解原著）" onblur="maybeAutoAnalyze()"></textarea>
+            <textarea id="n-source" rows="10" placeholder="粘贴已有小说的全文…"></textarea>
           </label>
           <div class="row" style="margin-top:6px">
             <button type="button" class="btn" onclick="pickSourceFile()">📄 从文件导入（.txt / .md）</button>
@@ -462,7 +467,6 @@
             <textarea id="n-task-instruction" rows="3" placeholder="改写示例：改写成第一人称、古文风、精简到原来的60%…；续写示例：让主角踏上复仇之路、开启全新篇章…"></textarea>
           </label>
         </div>
-        <div id="editor-profile-box"></div>
         <label>故事背景（时代/地点/大环境设定）
           <textarea id="n-background" rows="5" placeholder="如：架空的东方大陆，王朝末年，边关战乱频仍"></textarea>
         </label>
@@ -477,13 +481,27 @@
         </label>
         <div style="margin-top:16px">
           <button class="btn primary" onclick="saveNovelBasics()">保存基本信息</button>
-          <button class="btn" onclick="goStep(2)">下一步：角色设定 →</button>
+          <button class="btn" onclick="nextStep()">下一步 →</button>
         </div>
       </div>
 
-      <!-- 步骤 2：角色设定 -->
+      <!-- 步骤 2：AI 原著拆解（仅续写模式） -->
+      <div id="step-analyze" class="step-panel" style="display:none">
+        <h3>AI 原著拆解</h3>
+        <p class="hint">AI 将通读全文，提取人物档案、世界观、主线框架与脉络摘要，拆解结果将在本页完整展示（主要角色同时展示在下一步的角色设定中）。拆解结果会自动保存，续写时严格遵循。</p>
+        <div id="wizard-analyze-box">
+          <button class="btn primary" id="wizard-analyze-btn" onclick="analyzeInWizard()">🧠 开始拆解原著</button>
+        </div>
+        <div style="margin-top:16px">
+          <button class="btn" onclick="prevStep()">← 上一步</button>
+          <button class="btn" onclick="nextStep()">下一步：角色设定 →</button>
+        </div>
+      </div>
+
+      <!-- 步骤 3：角色设定 -->
       <div id="step-2" class="step-panel" style="display:none">
         <h3>角色设定</h3>
+        <div id="analyzed-chars-box"></div>
         <p class="hint">在「角色库」中统一管理角色：上传照片、AI 自动分析外貌与性格。可从角色库选择已有角色（一个角色可同时属于多部小说），也可新建角色。</p>
         <div class="row" style="gap:10px">
           <button class="btn" onclick="goAddCharacterFromWizard()">＋ 新建角色</button>
@@ -508,9 +526,9 @@
         <button class="btn" onclick="addRelation()">＋ 添加关系</button>
 
         <div style="margin-top:20px">
-          <button class="btn" onclick="goStep(1)">← 上一步</button>
+          <button class="btn" onclick="prevStep()">← 上一步</button>
           <button class="btn primary" onclick="saveNovelCharsOnly()">保存角色设定</button>
-          <button class="btn" onclick="goStep(3)">下一步：模型与提示词 →</button>
+          <button class="btn" onclick="nextStep()">下一步：模型与提示词 →</button>
         </div>
       </div>
 
@@ -528,7 +546,7 @@
           <textarea id="global-prompt" rows="8" placeholder=""></textarea>
         </div>
         <div style="margin-top:16px">
-          <button class="btn" onclick="goStep(2)">← 上一步</button>
+          <button class="btn" onclick="prevStep()">← 上一步</button>
           <button class="btn primary" onclick="saveNovelModelAndPrompt()">保存模型与提示词</button>
           <button class="btn primary" onclick="saveNovelModelAndPrompt(true)">保存并进入生成 →</button>
         </div>
@@ -628,16 +646,14 @@
           <span class="meta" id="continue-chapter-hint">接下来写第 1 章</span>
         </div>
         <p class="hint">以导入的原文为前情，告诉 AI 这一章要续写什么情节，AI 会承接原文结尾继续创作。</p>
-        <textarea id="continue-instruction" rows="3" placeholder="例如：主角在多年后重返故地，发现当年的真相另有隐情……"></textarea>
+        <textarea id="continue-instruction" rows="6" placeholder="例如：主角在多年后重返故地，发现当年的真相另有隐情……"></textarea>
         <div class="row" style="margin-top:10px">
           <button class="btn primary" id="continue-gen-btn" onclick="generateContinueChapter()">续写下一章</button>
-          <button class="btn" id="continue-analyze-btn" onclick="analyzeSourceProfile()">🧠 AI 拆解原著</button>
           <span class="spacer"></span>
           <button class="btn" onclick="nav('#/novels/' + currentNovelId + '/read')" id="continue-read-btn" style="display:none">阅读全文</button>
         </div>
       </div>
       <div class="card source-card" id="continue-source-box"></div>
-      <div id="continue-profile-box"></div>
       <div id="continue-body"></div>
     </section>
 
@@ -664,6 +680,11 @@
       </div>
     </section>
   </main>
+
+  <footer class="app-footer">
+    <span>织叙-NexTale</span>
+    <span class="footer-version" id="app-version"></span>
+  </footer>
 
   <div id="toast" class="toast"></div>
 
@@ -702,6 +723,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260827d"></script>
+  <script src="app.js?v=20260828d"></script>
 </body>
 </html>

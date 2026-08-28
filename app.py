@@ -24,7 +24,8 @@ import storage
 from ai_client import AIClientError, PRESET_BASE_URLS, list_models, test_connection
 
 BASE_DIR = Path(__file__).resolve().parent
-app = FastAPI(title="织叙-NexTale", version="1.0.0")
+APP_VERSION = (BASE_DIR / "VERSION").read_text(encoding="utf-8").strip()
+app = FastAPI(title="织叙-NexTale", version=APP_VERSION)
 
 app.add_middleware(
     CORSMiddleware,
@@ -36,7 +37,7 @@ app.add_middleware(
 
 # ================= 用户认证 =================
 # 无需登录即可访问的路径前缀
-_PUBLIC_PREFIXES = ("/api/auth/",)
+_PUBLIC_PREFIXES = ("/api/auth/", "/api/version")
 
 # 简单的会话缓存：token -> user_id（减少 DB 查询）
 _session_cache: dict[str, str] = {}
@@ -76,6 +77,12 @@ async def auth_middleware(request: Request, call_next):
 def auth_status():
     """返回是否已有用户（用于前端决定显示登录还是创建管理员）。"""
     return {"has_users": storage.has_users()}
+
+
+@app.get("/api/version")
+def get_version():
+    """返回当前应用版本号。"""
+    return {"version": APP_VERSION}
 
 
 @app.post("/api/auth/login")
@@ -1881,68 +1888,6 @@ async def continue_stream(request: Request, nid: str, body: dict):
             yield sse({"type": "done", "novel": n2})
             if "err" in stream_error:
                 yield sse({"type": "error", "message": str(_err(stream_error["err"]).detail)})
-        except Exception as e:  # noqa: BLE001
-            yield sse({"type": "error", "message": str(_err(e).detail)})
-
-    return StreamingResponse(
-        gen(), media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
-    )
-
-
-@app.post("/api/novels/{nid}/analyze")
-async def analyze_source(request: Request, nid: str):
-    """原著结构化拆解（SSE）：后台调用 LLM 提取故事档案，完成后持久化并返回。"""
-    uid = request.state.user_id
-    n = storage.get_novel(nid, uid)
-    if not n:
-        raise HTTPException(404, "小说不存在")
-    ctx = _ctx(n, uid)
-
-    def sse(event: dict) -> str:
-        return "data: " + json.dumps(event, ensure_ascii=False) + "\n\n"
-
-    q: queue.Queue = queue.Queue(maxsize=16)
-    loop = asyncio.get_running_loop()
-    heartbeat_stop = threading.Event()
-
-    def _producer():
-        try:
-            q.put({"type": "progress", "step": 0, "total": 1, "message": "开始拆解原著…"})
-            profile = generators.analyze_source_profile(
-                ctx, n,
-                on_progress=lambda step, total, msg: q.put(
-                    {"type": "progress", "step": step, "total": total, "message": msg}))
-            def mut(m):
-                m["structured_profile"] = json.dumps(profile, ensure_ascii=False)
-            storage.update_novel(nid, uid, mut)
-            q.put({"type": "profile", "profile": profile})
-        except Exception as e:  # noqa: BLE001
-            q.put({"type": "error", "message": str(_err(e).detail)})
-        finally:
-            heartbeat_stop.set()
-            q.put(None)
-
-    threading.Thread(target=_producer, daemon=True).start()
-
-    def _heartbeat():
-        while not heartbeat_stop.is_set():
-            heartbeat_stop.wait(15)
-            if not heartbeat_stop.is_set():
-                q.put({"type": "progress", "step": -1, "total": -1, "message": "仍在拆解中，请稍候…"})
-
-    threading.Thread(target=_heartbeat, daemon=True).start()
-
-    async def gen():
-        try:
-            while True:
-                item = await loop.run_in_executor(None, q.get)
-                if item is None:
-                    break
-                yield sse(item)
-                await asyncio.sleep(0)
-            n2 = storage.get_novel(nid, uid)
-            yield sse({"type": "done", "novel": n2})
         except Exception as e:  # noqa: BLE001
             yield sse({"type": "error", "message": str(_err(e).detail)})
 

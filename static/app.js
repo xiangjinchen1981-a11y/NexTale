@@ -187,19 +187,33 @@ async function onLoginSuccess() {
   await router();
 }
 
+function toggleUserDropdown() {
+  const menu = $('user-dropdown-menu');
+  if (menu) menu.classList.toggle('open');
+}
+
+function closeUserDropdown() {
+  const menu = $('user-dropdown-menu');
+  if (menu) menu.classList.remove('open');
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.user-dropdown')) closeUserDropdown();
+});
+
 function updateUserUI() {
+  const dropdown = $('user-dropdown');
   const badge = $('user-badge');
   const btnUsers = $('btn-users');
-  const btnLogout = $('btn-logout');
   if (currentUser) {
-    if (badge) { badge.textContent = currentUser.username; badge.style.display = ''; }
-    if (btnLogout) btnLogout.style.display = '';
+    if (badge) badge.textContent = currentUser.username;
+    if (dropdown) dropdown.style.display = '';
     if (btnUsers) btnUsers.style.display = currentUser.role === 'admin' ? '' : 'none';
   } else {
-    if (badge) badge.style.display = 'none';
-    if (btnLogout) btnLogout.style.display = 'none';
+    if (dropdown) dropdown.style.display = 'none';
     if (btnUsers) btnUsers.style.display = 'none';
   }
+  closeUserDropdown();
 }
 
 function logout() {
@@ -338,15 +352,13 @@ function showView(name) {
   // 登录页时隐藏顶部导航；其他页面显示
   const isLogin = name === 'login';
   const tabs = $('main-tabs');
-  const logoutBtn = $('btn-logout');
   const providersBtn = $('btn-providers');
   const usersBtn = $('btn-users');
-  const userBadge = $('user-badge');
+  const userDropdown = $('user-dropdown');
   if (tabs) tabs.style.display = isLogin ? 'none' : '';
   if (providersBtn) providersBtn.style.display = isLogin ? 'none' : '';
   if (usersBtn) usersBtn.style.display = (isLogin || !currentUser || currentUser.role !== 'admin') ? 'none' : '';
-  if (userBadge) userBadge.style.display = isLogin ? 'none' : '';
-  if (logoutBtn) logoutBtn.style.display = isLogin ? 'none' : '';
+  if (userDropdown) userDropdown.style.display = (isLogin || !currentUser) ? 'none' : '';
   // 顶部标签高亮（providers/配置页 与 login 不点亮任何标签）
   document.querySelectorAll('.tab').forEach(b => {
     const tab = b.dataset.tab;
@@ -1996,7 +2008,7 @@ function onModeChange() {
       if (label) label.style.display = (mode === 'continue') ? 'none' : '';
     }
   });
-  renderEditorProfile();
+  renderSteps();
 }
 
 function goStep(n) {
@@ -2004,17 +2016,69 @@ function goStep(n) {
   renderSteps();
 }
 
+function getWizardSteps() {
+  const mode = $('n-mode') ? $('n-mode').value : 'outline';
+  return mode === 'continue' ? [1, 'analyze', 2, 3] : [1, 2, 3];
+}
+
+function nextStep() {
+  const steps = getWizardSteps();
+  const idx = steps.indexOf(state.wizardStep);
+  if (idx >= 0 && idx < steps.length - 1) goStep(steps[idx + 1]);
+}
+
+function prevStep() {
+  const steps = getWizardSteps();
+  const idx = steps.indexOf(state.wizardStep);
+  if (idx > 0) goStep(steps[idx - 1]);
+}
+
 function renderSteps() {
-  [1, 2, 3].forEach(i => {
-    const panel = $('step-' + i);
+  const mode = $('n-mode') ? $('n-mode').value : 'outline';
+  const isContinue = mode === 'continue';
+  const steps = getWizardSteps();
+
+  // 续写模式：显示 AI 拆解步骤指示器，更新后续编号
+  const dotAnalyze = $('step-dot-analyze');
+  if (dotAnalyze) dotAnalyze.style.display = isContinue ? '' : 'none';
+
+  const dot2 = $('step-dot-2');
+  if (dot2) dot2.textContent = isContinue ? '③ 角色设定' : '② 角色设定';
+  const dot3 = $('step-dot-3');
+  if (dot3) dot3.textContent = isContinue ? '④ 模型与提示词' : '③ 模型与提示词';
+
+  // 面板显隐
+  ['step-1', 'step-analyze', 'step-2', 'step-3'].forEach(id => {
+    const panel = $(id);
+    if (panel) panel.style.display = '';
+  });
+  if (!isContinue) {
+    const ap = $('step-analyze');
+    if (ap) ap.style.display = 'none';
+  }
+  // 非续写模式跳过 analyze
+  if (state.wizardStep === 'analyze' && !isContinue) {
+    state.wizardStep = 2;
+  }
+
+  [1, 'analyze', 2, 3].forEach(i => {
+    const panelId = i === 'analyze' ? 'step-analyze' : 'step-' + i;
+    const panel = $(panelId);
     if (panel) panel.style.display = (i === state.wizardStep) ? 'block' : 'none';
-    const dot = $('step-dot-' + i);
+
+    const dotId = i === 'analyze' ? 'step-dot-analyze' : 'step-dot-' + i;
+    const dot = $(dotId);
     if (dot) {
       dot.classList.toggle('active', i === state.wizardStep);
-      dot.classList.toggle('done', i < state.wizardStep);
+      const curIdx = steps.indexOf(state.wizardStep);
+      const thisIdx = steps.indexOf(i);
+      dot.classList.toggle('done', thisIdx >= 0 && curIdx >= 0 && thisIdx < curIdx);
     }
   });
+
+  if (state.wizardStep === 'analyze') renderWizardAnalyzeBox();
   if (state.wizardStep === 2) {
+    renderAnalyzedCharacters();
     renderCharacters();
     renderRelations();
   }
@@ -3749,7 +3813,6 @@ function applyGenreTemplate() {
   if (!gid) return;
   const g = (state.genres || []).find(x => x.id === gid);
   if (!g) return;
-  if (g.name && $('n-genre')) $('n-genre').value = g.name;
   if (g.style && $('n-style')) $('n-style').value = g.style;
   if (g.reference_text && $('n-reference')) $('n-reference').value = g.reference_text;
   toast('已套用题材「' + g.name + '」的风格与参考文本', 'ok');
@@ -4137,7 +4200,6 @@ async function saveOutline() {
 // ============ 改写 / 续写模式（导入已有小说） ============
 let rewriteGenerating = false;   // 改写中（防止重复提交）
 let continueGenerating = false;  // 续写中
-let continueAnalyzing = false;   // 原著结构化拆解中
 
 // 触发文件选择导入原文
 function pickSourceFile() {
@@ -4157,7 +4219,7 @@ function onSourceFilePicked(input) {
     const info = $('n-source-info');
     if (info) info.textContent = `已导入：${file.name}（${text.length} 字）`;
     toast('原文已导入', 'ok');
-    maybeAutoAnalyze();  // 续写模式：导入后自动拆解原著
+    maybeAutoAnalyze();  // 清除旧的拆解结果
   };
   reader.onerror = () => toast('文件读取失败', 'err');
   reader.readAsText(file, 'utf-8');
@@ -4312,8 +4374,6 @@ function renderContinue() {
   const chapters = (n.chapters || []).filter(c => c.content);
   const source = n.source_text || '';
 
-  renderContinueProfile();
-
   const hint = $('continue-chapter-hint');
   if (hint) hint.textContent = chapters.length ? `已续写 ${chapters.length} 章，接下来写第 ${chapters.length + 1} 章` : '接下来写第 1 章';
   const readBtn = $('continue-read-btn');
@@ -4422,6 +4482,21 @@ async function generateContinueChapter() {
 // ===== 原著结构化拆解（续写模式） =====
 let editorAnalyzing = false;   // 编辑页自动拆解中
 
+// 模型偶尔把字段输出成数组/对象（提示词要求字符串），归一化为可读文本
+function profileVal(v) {
+  if (v == null) return '';
+  if (Array.isArray(v)) {
+    return v.map(x => (x && typeof x === 'object') ? JSON.stringify(x) : String(x ?? ''))
+      .map(s => s.trim()).filter(Boolean).join('；');
+  }
+  if (typeof v === 'object') {
+    return Object.entries(v)
+      .map(([k, x]) => `${k}：${(x && typeof x === 'object') ? JSON.stringify(x) : x}`)
+      .filter(Boolean).join('；');
+  }
+  return String(v);
+}
+
 // 生成档案主体 HTML（人物/世界观/主线/摘要），供编辑页与续写页共用
 function profileHTML(profile) {
   const chars = profile.characters || [];
@@ -4434,29 +4509,29 @@ function profileHTML(profile) {
     <div class="profile-char-grid">${chars.map(c => `
       <div class="card profile-char">
         <div class="row"><span class="title">👤 ${esc(c.name || '未命名')}</span></div>
-        ${c.core_personality ? `<div class="meta"><b>核心性格</b>：${esc(c.core_personality)}</div>` : ''}
-        ${c.speaking_style ? `<div class="meta"><b>说话风格</b>：${esc(c.speaking_style)}</div>` : ''}
-        ${c.key_history ? `<div class="meta"><b>重大经历</b>：${esc(c.key_history)}</div>` : ''}
-        ${c.relationship ? `<div class="meta"><b>人物关系</b>：${esc(c.relationship)}</div>` : ''}
-        ${c.current_state ? `<div class="meta"><b>当前状态</b>：${esc(c.current_state)}</div>` : ''}
-        ${c.taboo ? `<div class="meta"><b>🚫 行为禁忌</b>：${esc(c.taboo)}</div>` : ''}
+        ${profileVal(c.core_personality) ? `<div class="meta"><b>核心性格</b>：${esc(profileVal(c.core_personality))}</div>` : ''}
+        ${profileVal(c.speaking_style) ? `<div class="meta"><b>说话风格</b>：${esc(profileVal(c.speaking_style))}</div>` : ''}
+        ${profileVal(c.key_history) ? `<div class="meta"><b>重大经历</b>：${esc(profileVal(c.key_history))}</div>` : ''}
+        ${profileVal(c.relationship) ? `<div class="meta"><b>人物关系</b>：${esc(profileVal(c.relationship))}</div>` : ''}
+        ${profileVal(c.current_state) ? `<div class="meta"><b>当前状态</b>：${esc(profileVal(c.current_state))}</div>` : ''}
+        ${profileVal(c.taboo) ? `<div class="meta"><b>🚫 行为禁忌</b>：${esc(profileVal(c.taboo))}</div>` : ''}
       </div>`).join('')}</div>` : '';
 
   const wsRows = [
-    ['🌍 世界规则', ws.world_rules],
-    ['🗺️ 重要地域', ws.geography],
-    ['⚔️ 各大势力', ws.forces],
-    ['📖 专有名词', ws.noun_glossary],
+    ['🌍 世界规则', profileVal(ws.world_rules)],
+    ['🗺️ 重要地域', profileVal(ws.geography)],
+    ['⚔️ 各大势力', profileVal(ws.forces)],
+    ['📖 专有名词', profileVal(ws.noun_glossary)],
   ].filter(x => x[1]).map(x => `<div class="meta"><b>${x[0]}</b>：${esc(x[1])}</div>`).join('');
   const wsCard = wsRows ? `<h4 class="profile-h4">🌐 世界观设定</h4><div class="card profile-block">${wsRows}</div>` : '';
 
   const fg = Array.isArray(mf.foreshadowing_list) ? mf.foreshadowing_list : [];
-  const fgList = fg.length ? `<ul class="profile-list">${fg.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : '';
+  const fgList = fg.length ? `<ul class="profile-list">${fg.map(x => `<li>${esc(profileVal(x))}</li>`).join('')}</ul>` : '';
   const mfRows = [
-    ['🎯 核心主题', mf.core_theme],
-    ['🏁 主角长期目标', mf.protagonist_goal],
-    ['💥 核心矛盾', mf.main_conflict],
-    ['🎭 文风基调', mf.story_tone],
+    ['🎯 核心主题', profileVal(mf.core_theme)],
+    ['🏁 主角长期目标', profileVal(mf.protagonist_goal)],
+    ['💥 核心矛盾', profileVal(mf.main_conflict)],
+    ['🎭 文风基调', profileVal(mf.story_tone)],
   ].filter(x => x[1]).map(x => `<div class="meta"><b>${x[0]}</b>：${esc(x[1])}</div>`).join('');
   const mfCard = (mfRows || fgList) ? `
     <h4 class="profile-h4">🧭 主线框架</h4>
@@ -4466,9 +4541,9 @@ function profileHTML(profile) {
   const chList = chSummaries.length ? `
     <h4 class="profile-h4">📑 章节脉络（${chSummaries.length}）</h4>
     <div class="card profile-block"><div class="profile-ch-grid">${chSummaries.map(cs => `
-      <div class="profile-ch"><span class="badge">${esc(cs.chapter || '')}</span><span class="meta">${esc(cs.brief || '')}</span></div>`).join('')}</div></div>` : '';
+      <div class="profile-ch"><span class="badge">${esc(profileVal(cs.chapter))}</span><span class="meta">${esc(profileVal(cs.brief))}</span></div>`).join('')}</div></div>` : '';
 
-  const smCard = (sm.full_outline ? `<h4 class="profile-h4">📜 全书脉络摘要</h4><div class="card profile-block"><div class="chapter-content">${esc(sm.full_outline)}</div></div>` : '') + chList;
+  const smCard = (profileVal(sm.full_outline) ? `<h4 class="profile-h4">📜 全书脉络摘要</h4><div class="card profile-block"><div class="chapter-content">${esc(profileVal(sm.full_outline))}</div></div>` : '') + chList;
 
   return charCards + wsCard + mfCard + smCard;
 }
@@ -4483,6 +4558,8 @@ async function analyzeSourceText(source) {
     else if (ev.type === 'progress') {
       const sub = $('loading-sub');
       if (sub && ev.message) sub.textContent = ev.message;
+      const wp = $('wizard-analyze-progress');
+      if (wp && ev.message) wp.textContent = ev.message;
     }
   }, { source_text: source, text_model_id: ($('n-model') ? $('n-model').value : '') });
   if (err) throw err;
@@ -4490,142 +4567,113 @@ async function analyzeSourceText(source) {
   return profile;
 }
 
-// 编辑页触发：续写模式下原文变化（粘贴后失焦 / 文件导入）时自动拆解
+// 编辑页：续写模式下原文变化时清除内存中的旧拆解结果（档案展示与重新拆解在第二步进行）
 function maybeAutoAnalyze() {
   const mode = $('n-mode') ? $('n-mode').value : '';
-  if (mode !== 'continue') { state.novelProfile = null; state.novelProfileSource = ''; renderEditorProfile(); return; }
+  if (mode !== 'continue') { state.novelProfile = null; state.novelProfileSource = ''; return; }
   const source = ($('n-source').value || '').trim();
   if (!source) {
     if (state.novelProfile || state.novelProfileSource) {
       state.novelProfile = null;
       state.novelProfileSource = '';
-      renderEditorProfile();
     }
     return;
   }
-  if (state.novelProfile && state.novelProfileSource === source) return;  // 原文未变化
-  analyzeSourceInEditor(source);
+  if (state.novelProfileSource && state.novelProfileSource !== source) {
+    state.novelProfile = null;
+    state.novelProfileSource = '';
+  }
 }
 
-async function analyzeSourceInEditor(source) {
-  source = (source || '').trim();
-  if (!source || editorAnalyzing) return;
+// 编辑页向导第 2 步（AI 原著拆解）内容渲染：
+// 未拆解 → 开始按钮；已拆解 → 完整档案（人物/世界观/主线/摘要）+ 重新拆解按钮
+function renderWizardAnalyzeBox() {
+  const box = $('wizard-analyze-box');
+  if (!box || editorAnalyzing) return;
+  const profile = state.novelProfile;
+  if (profile && Object.keys(profile).length) {
+    box.innerHTML = `
+      <div class="row" style="margin-bottom:10px">
+        <span class="badge">✅ 已拆解</span>
+        <span class="spacer"></span>
+        <button class="btn" onclick="analyzeInWizard()">🔄 重新拆解</button>
+      </div>
+      ${profileHTML(profile)}`;
+  } else {
+    box.innerHTML = '<button class="btn primary" id="wizard-analyze-btn" onclick="analyzeInWizard()">🧠 开始拆解原著</button>';
+  }
+}
+
+// 编辑页向导：在第二步手动触发原著拆解
+async function analyzeInWizard() {
+  const source = ($('n-source').value || '').trim();
+  if (!source) return toast('请先在第一步导入原文', 'err');
+  if (editorAnalyzing) return;
   editorAnalyzing = true;
-  state.novelProfileSource = source;
-  showLoading('正在拆解原著…', 'AI 正在通读全文，提取人物档案、世界观、主线框架与脉络摘要，请稍候');
+  const box = $('wizard-analyze-box');
+  if (box) box.innerHTML = '<div class="meta" id="wizard-analyze-progress" style="margin-top:10px">AI 正在通读全文，提取人物档案、世界观、主线框架与伏笔…</div>';
   try {
+    state.novelProfileSource = source;
     state.novelProfile = await analyzeSourceText(source);
-    renderEditorProfile();
+    // 已有小说：立即持久化档案，避免刷新/跳转后丢失（新建小说在首次保存时写入）
+    if (state.novel && state.novel.id) {
+      try {
+        const d = await api('/api/novels/' + state.novel.id, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ structured_profile: JSON.stringify(state.novelProfile) }),
+        });
+        state.novel = d.novel;
+      } catch (e) {
+        toast('档案已生成，但自动保存失败：' + e.message + '（请点击「保存基本信息」手动保存）', 'err');
+      }
+    }
     toast('原著拆解完成', 'ok');
   } catch (e) {
     toast(e.message, 'err');
     state.novelProfile = null;
     state.novelProfileSource = '';
-    renderEditorProfile();
   } finally {
     editorAnalyzing = false;
-    hideLoading();
+    renderWizardAnalyzeBox();
   }
 }
 
-// 编辑设定页档案展示（用编辑会话中暂存的 state.novelProfile）
-function renderEditorProfile() {
-  const box = $('editor-profile-box');
+// 角色设定步骤顶部展示 AI 拆解出的前 5 个角色
+function renderAnalyzedCharacters() {
+  const box = $('analyzed-chars-box');
   if (!box) return;
   const mode = $('n-mode') ? $('n-mode').value : '';
-  if (mode !== 'continue') { box.innerHTML = ''; return; }
   const profile = state.novelProfile;
-  if (!profile || !Object.keys(profile).length) {
-    const source = ($('n-source').value || '').trim();
-    box.innerHTML = source
-      ? `<div class="card meta"><span class="badge">🧠 自动拆解</span><div class="meta" style="margin-top:6px">粘贴完成（点击别处）或从文件导入后会自动分析原著，提取人物档案、世界观、主线框架与伏笔。</div></div>`
-      : '';
+  if (mode !== 'continue' || !profile || !profile.characters || !profile.characters.length) {
+    box.innerHTML = '';
     return;
   }
+  const top = profile.characters.slice(0, 5);
   box.innerHTML = `
-    <div class="card profile-wrap">
-      <div class="row">
-        <span class="title">🧠 原著故事档案</span>
-        <span class="badge">已拆解</span>
-        <span class="spacer"></span>
-        <button class="btn" onclick="analyzeSourceInEditor($('n-source').value.trim())">🔄 重新拆解</button>
+    <div class="card" style="margin-bottom:16px">
+      <div class="row"><span class="title">🧠 AI 拆解主要角色（前 ${top.length} 位）</span></div>
+      <div class="profile-char-grid" style="margin-top:10px">
+        ${top.map(c => `
+          <div class="card profile-char">
+            <div class="row"><span class="title">👤 ${esc(c.name || '未命名')}</span></div>
+            ${profileVal(c.core_personality) ? `<div class="meta"><b>核心性格</b>：${esc(profileVal(c.core_personality))}</div>` : ''}
+            ${profileVal(c.speaking_style) ? `<div class="meta"><b>说话风格</b>：${esc(profileVal(c.speaking_style))}</div>` : ''}
+            ${profileVal(c.relationship) ? `<div class="meta"><b>人物关系</b>：${esc(profileVal(c.relationship))}</div>` : ''}
+            ${profileVal(c.current_state) ? `<div class="meta"><b>当前状态</b>：${esc(profileVal(c.current_state))}</div>` : ''}
+          </div>`).join('')}
       </div>
-      ${profileHTML(profile)}
     </div>`;
-}
-
-// 续写页档案展示（读已保存的 structured_profile）
-function renderContinueProfile() {
-  const box = $('continue-profile-box');
-  if (!box) return;
-  const n = state.novel;
-  let profile = null;
-  try {
-    if (n && n.structured_profile) profile = JSON.parse(n.structured_profile);
-  } catch (e) { profile = null; }
-
-  if (!profile || !Object.keys(profile).length) {
-    const hasSource = !!(n && (n.source_text || '').trim());
-    box.innerHTML = `
-      <div class="card meta">
-        <div class="row">
-          <span class="title">🧠 原著故事档案</span>
-          <span class="badge">未拆解</span>
-        </div>
-        <p class="hint" style="margin:6px 0 0">${hasSource
-          ? '点击上方「🧠 AI 拆解原著」，AI 会自动提取人物档案、世界观、主线框架与脉络摘要，续写时严格据此保持一致（防 OOC、回收伏笔）。'
-          : '尚未导入原文。请先到「编辑设定」导入原著全文，再进行拆解。'}</p>
-      </div>`;
-    return;
-  }
-
-  box.innerHTML = `
-    <div class="card profile-wrap">
-      <div class="row">
-        <span class="title">🧠 原著故事档案</span>
-        <span class="badge">已拆解</span>
-        <span class="spacer"></span>
-        <button class="btn" onclick="analyzeSourceProfile()">🔄 重新拆解</button>
-      </div>
-      ${profileHTML(profile)}
-    </div>`;
-}
-
-async function analyzeSourceProfile() {
-  if (continueAnalyzing) return;
-  if (!state.novel || !(state.novel.source_text || '').trim()) {
-    return toast('尚未导入原文，请先到「编辑设定」导入', 'err');
-  }
-  continueAnalyzing = true;
-  const btn = $('continue-analyze-btn');
-  const box = $('continue-profile-box');
-  if (btn) { btn.disabled = true; btn.textContent = '🧠 拆解中…'; }
-  if (box) box.innerHTML = '<div class="card meta"><span class="badge gen-badge">🧠 正在拆解原著…</span><div class="gen-output" style="margin-top:8px" id="continue-analyze-progress">AI 正在通读全文并提取人物档案、世界观、主线框架与脉络摘要（原文较长，可能需要 1~3 分钟）…</div></div>';
-  try {
-    await streamApi(`/api/novels/${state.novel.id}/analyze`, (ev) => {
-      if (ev.type === 'profile') {
-        state.novel.structured_profile = JSON.stringify(ev.profile);
-      } else if (ev.type === 'error') {
-        throw new Error(ev.message);
-      } else if (ev.type === 'progress') {
-        const pg = $('continue-analyze-progress');
-        if (pg && ev.message) pg.textContent = ev.message;
-      }
-    });
-  } catch (e) {
-    toast(e.message, 'err');
-    renderContinueProfile();
-    return;
-  } finally {
-    continueAnalyzing = false;
-    if (btn) { btn.disabled = false; btn.textContent = '🧠 AI 拆解原著'; }
-  }
-  renderContinueProfile();
-  toast('原著拆解完成，续写将严格遵循该档案', 'ok');
 }
 
 // ============ 初始化 ============
 (async function init() {
+  // 加载版本号（公开接口，无需登录）
+  try {
+    const v = await fetch('/api/version').then(r => r.json());
+    const el = $('app-version');
+    if (el) el.textContent = v.version;
+  } catch (_) {}
+
   // 登录表单 Enter 键支持
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
