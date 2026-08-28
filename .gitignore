@@ -4,6 +4,7 @@ server.log
 nohup.out
 __pycache__/
 *.pyc
+data/
 data/*.json
 data/*.db
 uploads/*
@@ -12,3 +13,4 @@ output/*
 !output/.gitkeep
 .DS_Store
 run.sh
+.qoder/

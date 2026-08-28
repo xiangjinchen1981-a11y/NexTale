@@ -112,53 +112,108 @@ function hideLoading() {
 }
 
 // ============ 用户认证 ============
-// 进入登录页：判断是首次设置密码还是常规登录
+let currentUser = null;
+
 async function prepareLogin() {
   try {
     const res = await fetch('/api/auth/status');
     const d = await res.json();
-    const hint = $('login-hint');
-    const btn = $('login-btn');
-    if (d.has_password) {
-      if (hint) hint.textContent = '请输入访问密码';
-      if (btn) btn.textContent = '登录';
+    const loginCard = document.querySelector('#view-login .login-card');
+    const regCard = $('register-card');
+    if (d.has_users) {
+      loginCard.style.display = '';
+      if (regCard) regCard.style.display = 'none';
     } else {
-      if (hint) hint.textContent = '首次使用，请设置访问密码';
-      if (btn) btn.textContent = '设置密码并进入';
+      loginCard.style.display = 'none';
+      if (regCard) regCard.style.display = '';
     }
     const pwd = $('login-password');
     if (pwd) pwd.value = '';
-  } catch (e) {
-    // 忽略，保持默认提示
-  }
+    const uname = $('login-username');
+    if (uname) uname.value = '';
+  } catch (e) {}
 }
 
 async function doLogin() {
-  const pwd = ($('login-password') || {}).value || '';
-  if (!pwd) { toast('请输入密码', 'err'); return; }
+  const username = ($('login-username') || {}).value || '';
+  const password = ($('login-password') || {}).value || '';
+  if (!username || !password) { toast('请输入用户名和密码', 'err'); return; }
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: pwd }),
+      body: JSON.stringify({ username, password }),
     });
     const d = await res.json();
-    if (!res.ok) {
-      toast(d.detail || '登录失败', 'err');
-      return;
-    }
+    if (!res.ok) { toast(d.detail || '登录失败', 'err'); return; }
     authToken = d.token;
+    currentUser = d.user;
     localStorage.setItem('novel_token', authToken);
-    toast(d.first_setup ? '密码已设置' : '登录成功', 'ok');
-    // 登录成功后加载基础数据，再进入主页面
-    try {
-      await loadSettings();
-      await loadProviders();
-      await loadCharacters();
-      await loadGenres();
-    } catch (e) { /* 忽略，路由加载时还会再触发 */ }
-    location.hash = '#/novels';
-    await router();
+    toast('登录成功', 'ok');
+    onLoginSuccess();
   } catch (e) { toast('登录失败：' + e.message, 'err'); }
+}
+
+async function doRegister() {
+  const username = ($('reg-username') || {}).value || '';
+  const password = ($('reg-password') || {}).value || '';
+  const password2 = ($('reg-password2') || {}).value || '';
+  if (!username || !password) { toast('请输入用户名和密码', 'err'); return; }
+  if (password !== password2) { toast('两次密码不一致', 'err'); return; }
+  if (password.length < 4) { toast('密码至少 4 个字符', 'err'); return; }
+  try {
+    const res = await fetch('/api/auth/register', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const d = await res.json();
+    if (!res.ok) { toast(d.detail || '注册失败', 'err'); return; }
+    authToken = d.token;
+    currentUser = d.user;
+    localStorage.setItem('novel_token', authToken);
+    toast('管理员已创建', 'ok');
+    onLoginSuccess();
+  } catch (e) { toast('注册失败：' + e.message, 'err'); }
+}
+
+async function onLoginSuccess() {
+  updateUserUI();
+  try {
+    await loadSettings();
+    await loadProviders();
+    await loadAllCharacters();
+    await loadGenres();
+  } catch (e) {}
+  location.hash = '#/novels';
+  await router();
+}
+
+function toggleUserDropdown() {
+  const menu = $('user-dropdown-menu');
+  if (menu) menu.classList.toggle('open');
+}
+
+function closeUserDropdown() {
+  const menu = $('user-dropdown-menu');
+  if (menu) menu.classList.remove('open');
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.user-dropdown')) closeUserDropdown();
+});
+
+function updateUserUI() {
+  const dropdown = $('user-dropdown');
+  const badge = $('user-badge');
+  const btnUsers = $('btn-users');
+  if (currentUser) {
+    if (badge) badge.textContent = currentUser.username;
+    if (dropdown) dropdown.style.display = '';
+    if (btnUsers) btnUsers.style.display = currentUser.role === 'admin' ? '' : 'none';
+  } else {
+    if (dropdown) dropdown.style.display = 'none';
+    if (btnUsers) btnUsers.style.display = 'none';
+  }
+  closeUserDropdown();
 }
 
 function logout() {
@@ -167,7 +222,9 @@ function logout() {
     headers: { 'Authorization': 'Bearer ' + authToken },
   }).catch(() => {});
   authToken = '';
+  currentUser = null;
   localStorage.removeItem('novel_token');
+  updateUserUI();
   location.hash = '#/login';
   showView('login');
   prepareLogin();
@@ -175,10 +232,97 @@ function logout() {
 
 function handleUnauthorized() {
   authToken = '';
+  currentUser = null;
   localStorage.removeItem('novel_token');
+  updateUserUI();
   location.hash = '#/login';
   showView('login');
   prepareLogin();
+}
+
+// ============ 用户管理 ============
+async function loadUsers() {
+  try {
+    const d = await api('/api/users');
+    renderUsers(d);
+  } catch (e) {}
+}
+
+function renderUsers(users) {
+  const el = $('user-list');
+  if (!el) return;
+  if (!users || !users.length) {
+    el.innerHTML = '<p class="hint">暂无其他用户</p>';
+    return;
+  }
+  el.innerHTML = `<table class="user-table"><thead><tr>
+    <th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th>
+    </tr></thead><tbody>
+    ${users.map(u => `<tr>
+      <td>${esc(u.username)}</td>
+      <td>${u.role === 'admin' ? '管理员' : '普通用户'}</td>
+      <td>${u.created_at ? new Date(u.created_at * 1000).toLocaleString('zh-CN', {hour12: false}) : '-'}</td>
+      <td>
+        <button class="btn btn-sm" onclick="changeUserPassword('${u.id}', '${esc(u.username)}')">改密码</button>
+        <button class="btn btn-sm" onclick="toggleUserRole('${u.id}', '${u.role}')">${u.role === 'admin' ? '降为普通' : '升为管理'}</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}', '${esc(u.username)}')">删除</button>
+      </td>
+    </tr>`).join('')}
+    </tbody></table>`;
+}
+
+async function createUser() {
+  const username = ($('new-username') || {}).value || '';
+  const password = ($('new-password') || {}).value || '';
+  const role = ($('new-role') || {}).value || 'user';
+  if (!username || !password) { toast('请输入用户名和密码', 'err'); return; }
+  try {
+    await api('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, role }),
+    });
+    toast('用户已创建', 'ok');
+    $('new-username').value = '';
+    $('new-password').value = '';
+    await loadUsers();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function deleteUser(uid, name) {
+  if (!confirm(`确定删除用户「${name}」？该用户的所有数据将被清除。`)) return;
+  try {
+    await api(`/api/users/${uid}`, { method: 'DELETE' });
+    toast('用户已删除', 'ok');
+    await loadUsers();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function changeUserPassword(uid, name) {
+  const pw = prompt(`为用户「${name}」设置新密码（至少4位）：`);
+  if (!pw) return;
+  if (pw.length < 4) { toast('密码至少 4 个字符', 'err'); return; }
+  try {
+    await api(`/api/users/${uid}/password`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ new_password: pw }),
+    });
+    toast('密码已更新', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function toggleUserRole(uid, currentRole) {
+  const newRole = currentRole === 'admin' ? 'user' : 'admin';
+  try {
+    await api(`/api/users/${uid}/role`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: newRole }),
+    });
+    toast('角色已更新', 'ok');
+    await loadUsers();
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 function esc(s) {
@@ -195,7 +339,7 @@ function maskKey(k) {
 
 // ============ 视图 / 路由 ============
 // 视图列表：login（登录）、providers（配置）、genres（题材库）、worldbooks（世界书）、novels（列表）、trash（垃圾箱）、editor（创作）、generate（生成）、chapter（章节详情）、reader（阅读）、improv（即兴写作）、dialog（对话模式）、logs（请求日志）
-const VIEWS = ['login', 'providers', 'genres', 'worldbooks', 'characters', 'character-new', 'character-detail', 'novels', 'library', 'trash', 'editor', 'generate', 'chapter', 'reader', 'improv', 'dialog', 'rewrite', 'continue', 'logs'];
+const VIEWS = ['login', 'users', 'providers', 'genres', 'worldbooks', 'characters', 'character-new', 'character-detail', 'novels', 'library', 'trash', 'editor', 'generate', 'chapter', 'reader', 'improv', 'dialog', 'rewrite', 'continue', 'logs'];
 
 // 当前小说 id（用于创作/生成页定位）
 let currentNovelId = null;
@@ -208,11 +352,13 @@ function showView(name) {
   // 登录页时隐藏顶部导航；其他页面显示
   const isLogin = name === 'login';
   const tabs = $('main-tabs');
-  const logoutBtn = $('btn-logout');
   const providersBtn = $('btn-providers');
+  const usersBtn = $('btn-users');
+  const userDropdown = $('user-dropdown');
   if (tabs) tabs.style.display = isLogin ? 'none' : '';
-  if (logoutBtn) logoutBtn.style.display = isLogin ? 'none' : '';
   if (providersBtn) providersBtn.style.display = isLogin ? 'none' : '';
+  if (usersBtn) usersBtn.style.display = (isLogin || !currentUser || currentUser.role !== 'admin') ? 'none' : '';
+  if (userDropdown) userDropdown.style.display = (isLogin || !currentUser) ? 'none' : '';
   // 顶部标签高亮（providers/配置页 与 login 不点亮任何标签）
   document.querySelectorAll('.tab').forEach(b => {
     const tab = b.dataset.tab;
@@ -222,7 +368,7 @@ function showView(name) {
     else if (tab === 'characters') active = (name === 'characters' || name === 'character-new' || name === 'character-detail');
     else if (tab === 'library') active = (name === 'library');
     else if (tab === 'logs') active = (name === 'logs');
-    else if (tab === 'novels') active = (name !== 'genres' && name !== 'worldbooks' && name !== 'characters' && name !== 'character-new' && name !== 'character-detail' && name !== 'library' && name !== 'logs' && name !== 'login' && name !== 'providers');
+    else if (tab === 'novels') active = (name !== 'genres' && name !== 'worldbooks' && name !== 'characters' && name !== 'character-new' && name !== 'character-detail' && name !== 'library' && name !== 'logs' && name !== 'login' && name !== 'providers' && name !== 'users');
     b.classList.toggle('active', active);
   });
   // 视图切换时触发对应数据加载
@@ -259,6 +405,12 @@ async function router() {
     return;
   }
 
+  if (section === 'users') {
+    showView('users');
+    await loadUsers();
+    return;
+  }
+
   if (section === 'genres') {
     showView('genres');
     return;
@@ -274,7 +426,8 @@ async function router() {
       // 角色库列表页
       resumeWizardStep = null;
       showView('characters');
-      await loadCharacters();
+      await loadCharacterNovels();       // 加载小说下拉
+      await loadCharacters('');          // 默认加载最新 20 个角色
       renderCharacterGrid();
       return;
     }
@@ -856,8 +1009,29 @@ let charAssignNovelId = null;    // 从小说向导进入添加页时，新角�
 let resumeWizardStep = null;     // 从角色页返回小说编辑页时恢复的向导步骤
 let newCharPhotoBlob = null;     // 添加页已裁剪、待上传的照片
 
-async function loadCharacters() {
-  const d = await api('/api/characters');
+// 角色库小说筛选下拉数据（与角色列表分开，按需加载）
+let characterNovelList = [];
+
+// 加载小说列表（仅用于筛选下拉，不含角色）
+async function loadCharacterNovels() {
+  const d = await api('/api/characters/novels');
+  characterNovelList = d.novels || [];
+  renderCharacterNovelFilter();
+}
+
+// 按需加载角色：novelId 为空则加载最新 20 个，否则加载该小说角色
+async function loadCharacters(novelId) {
+  let url = '/api/characters';
+  if (novelId) {
+    url = '/api/characters?novel_id=' + encodeURIComponent(novelId);
+  }
+  const d = await api(url);
+  state.characters = d.characters;
+}
+
+// 加载全部角色（小说向导/详情等需要跨小说匹配的场景）
+async function loadAllCharacters() {
+  const d = await api('/api/characters?limit=10000');
   state.characters = d.characters;
 }
 
@@ -877,15 +1051,33 @@ function charCoverHTML(c) {
   </div>`;
 }
 
-// 角色库列表页：照片卡片网格
+// 角色库列表页：照片卡片网格（state.characters 已是按需加载后的结果）
 function renderCharacterGrid() {
   const box = $('character-grid');
   if (!box) return;
-  const chars = state.characters;
+  const hintEl = $('character-grid-hint');
+  const sel = $('character-novel-filter');
+  const novelId = sel ? sel.value : '';
+
+  const chars = state.characters || [];
+
+  if (hintEl) {
+    if (novelId) {
+      const novel = (characterNovelList || []).find(n => n.id === novelId);
+      hintEl.textContent = novel ? `《${novel.title || '未命名'}》共 ${chars.length} 个角色。` : '该小说暂无角色。';
+    } else {
+      hintEl.textContent = `展示最新的 ${chars.length} 个角色。`;
+    }
+  }
+
   if (!chars.length) {
-    box.innerHTML = '<div class="card meta" style="grid-column:1/-1">暂无角色，点击右上角「添加角色」创建你的第一个角色。</div>';
+    const emptyMsg = novelId
+      ? '该小说暂无角色，点击右上角「添加角色」创建，或在小说创作向导中添加。'
+      : '暂无角色，点击右上角「添加角色」创建你的第一个角色。';
+    box.innerHTML = `<div class="card meta" style="grid-column:1/-1">${emptyMsg}</div>`;
     return;
   }
+
   box.innerHTML = chars.map(c => `
     <div class="char-grid-card">
       <div class="char-grid-cover" onclick="openCharFromList('${c.id}')" title="点击查看/编辑角色">
@@ -896,6 +1088,27 @@ function renderCharacterGrid() {
         <div class="meta">${esc((c.appearance || '').slice(0, 40)) || '暂无外貌描述'}</div>
       </div>
     </div>`).join('');
+}
+
+// 小说筛选下拉：填充选项（保留当前选中）
+function renderCharacterNovelFilter() {
+  const sel = $('character-novel-filter');
+  if (!sel) return;
+  const prev = sel.value;
+  const novels = characterNovelList || [];
+  sel.innerHTML = '<option value="">最新角色（默认）</option>' + novels.map(n =>
+    `<option value="${esc(n.id)}">${esc(n.title || '未命名')}</option>`).join('');
+  if (prev && novels.some(n => n.id === prev)) {
+    sel.value = prev;
+  }
+}
+
+// 筛选下拉变更：按需请求对应小说的角色
+async function onCharacterNovelFilter() {
+  const sel = $('character-novel-filter');
+  const novelId = sel ? sel.value : '';
+  await loadCharacters(novelId);
+  renderCharacterGrid();
 }
 
 // 小说向导（步骤3）：当前小说角色的照片卡片网格
@@ -930,7 +1143,7 @@ function openCharFromList(id) {
 // —— 小说向导入口：点卡片进详情，返回时回到向导步骤3 ——
 async function openCharFromWizard(id) {
   charBackHash = state.novel ? ('#/novels/' + state.novel.id + '/edit') : '#/characters';
-  resumeWizardStep = 3;
+  resumeWizardStep = 2;
   await persistNovelCharsSilently();
   nav('#/characters/' + id);
 }
@@ -940,10 +1153,11 @@ function goBackFromCharacter() {
   nav(charBackHash || '#/characters');
 }
 
-// 添加角色（角色库入口）
+// 添加角色（角色库入口：新角色自动归入当前筛选的小说）
 function goAddCharacterFromList() {
   charBackHash = '#/characters';
-  charAssignNovelId = null;
+  const sel = $('character-novel-filter');
+  charAssignNovelId = sel && sel.value ? sel.value : null;
   resumeWizardStep = null;
   nav('#/characters/new');
 }
@@ -953,9 +1167,63 @@ async function goAddCharacterFromWizard() {
   if (!state.novel) return toast('请先完成基本信息', 'err');
   charBackHash = '#/novels/' + state.novel.id + '/edit';
   charAssignNovelId = state.novel.id;
-  resumeWizardStep = 3;
+  resumeWizardStep = 2;
   await persistNovelCharsSilently();
   nav('#/characters/new');
+}
+
+// —— 从角色库选择已有角色（一个角色可属于多部小说） ——
+async function toggleCharacterPicker() {
+  const panel = $('character-picker');
+  if (!panel) return;
+  const isHidden = panel.style.display === 'none';
+  if (isHidden) {
+    await loadAllCharacters();  // 确保拿到全量角色
+    renderCharacterPicker();
+    panel.style.display = 'block';
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+function renderCharacterPicker() {
+  const box = $('character-picker-list');
+  if (!box) return;
+  const chars = state.characters || [];
+  const currentIds = (state.novel && state.novel.character_ids) || [];
+  if (!chars.length) {
+    box.innerHTML = '<div class="meta">角色库为空，请先「新建角色」。</div>';
+    return;
+  }
+  box.innerHTML = chars.map(c => {
+    const checked = currentIds.includes(c.id);
+    return `
+    <label class="character-picker-item">
+      <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleNovelCharacter('${c.id}', this.checked)">
+      ${charCoverHTML(c)}
+      <span class="character-picker-name">${esc(c.name || '未命名')}</span>
+    </label>`;
+  }).join('');
+}
+
+// 勾选/取消勾选：把角色加入或移出本小说
+async function toggleNovelCharacter(id, checked) {
+  if (!state.novel) return;
+  let ids = (state.novel.character_ids || []).slice();
+  if (checked) {
+    if (!ids.includes(id)) ids.push(id);
+  } else {
+    ids = ids.filter(x => x !== id);
+  }
+  try {
+    const nd = await api('/api/novels/' + state.novel.id, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ character_ids: ids }),
+    });
+    state.novel = nd.novel;
+    renderCharacters();       // 刷新本小说角色网格
+    renderCharacterPicker();  // 刷新选择面板勾选状态
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 // 静默保存小说当前角色与关系（避免离开向导时丢失手动输入）
@@ -1020,7 +1288,7 @@ async function saveNewCharacter() {
       } catch (e) { /* 忽略 */ }
       charAssignNovelId = null;
     }
-    await loadCharacters();
+    await loadAllCharacters();
     toast('角色已添加', 'ok');
     // 进入详情页继续完善
     nav('#/characters/' + cid);
@@ -1029,7 +1297,7 @@ async function saveNewCharacter() {
 
 // 详情页：加载角色
 async function openCharacterDetail(id) {
-  if (!state.characters.length) { await loadCharacters(); }
+  if (!state.characters.length) { await loadAllCharacters(); }
   const c = state.characters.find(x => x.id === id);
   if (!c) { toast('角色不存在', 'err'); nav('#/characters'); return; }
   charDetailId = id;
@@ -1067,7 +1335,7 @@ async function saveCharacterDetail() {
         notes: $('c-detail-notes').value.trim(),
       }),
     });
-    await loadCharacters();
+    await loadAllCharacters();
     const title = $('character-detail-title');
     if (title) title.textContent = '角色详情 · ' + name;
     toast('角色已保存', 'ok');
@@ -1087,7 +1355,7 @@ function uploadDetailPhoto() {
       try {
         await uploadPhoto(id, blob);
         toast('照片已更新', 'ok');
-        await loadCharacters();
+        await loadAllCharacters();
         openCharacterDetail(id);
       } catch (e) { toast(e.message, 'err'); }
       finally { hideLoading(); }
@@ -1125,7 +1393,7 @@ async function deleteCharacterDetail() {
   if (!confirm('确定删除该角色？此操作不可恢复。')) return;
   try {
     await api('/api/characters/' + id, { method: 'DELETE' });
-    await loadCharacters();
+    await loadAllCharacters();
     toast('角色已删除', 'ok');
     goBackFromCharacter();
   } catch (e) { toast(e.message, 'err'); }
@@ -1142,7 +1410,7 @@ async function removeCharacterFromNovel(id) {
       body: JSON.stringify({ character_ids: ids }),
     });
     state.novel = nd.novel;
-    await loadCharacters();
+    await loadAllCharacters();
     renderCharacters();
     renderRelations();
     loadNovels();
@@ -1346,6 +1614,7 @@ async function loadNovels() {
   state.novels = d.novels;
   novelPage = 1;
   renderNovelFilterOptions();
+  renderModeFilterOptions();
   renderNovels();
 }
 
@@ -1368,6 +1637,17 @@ function renderNovelFilterOptions() {
   sel.value = cur || '';
 }
 
+// 填充创作模式筛选下拉框（由 NOVEL_MODES 驱动，与列表显示名保持一致）
+function renderModeFilterOptions() {
+  const sel = $('novel-mode-filter');
+  if (!sel) return;
+  const cur = sel.value;
+  const opts = ['<option value="">全部</option>'];
+  NOVEL_MODES.forEach(m => opts.push(`<option value="${m.value}">${m.label}</option>`));
+  sel.innerHTML = opts.join('');
+  sel.value = cur || '';
+}
+
 // 状态显示名
 function statusLabel(s) {
   return { 'draft': '草稿', 'outlined': '已生成大纲', 'generating': '生成中', 'done': '已完成', 'finished': '已完结' }[s] || s;
@@ -1377,9 +1657,19 @@ function statusLabel(s) {
 let novelPage = 1;
 const NOVEL_PAGE_SIZE = 5;
 
+// 创作模式定义（单一数据源）：新增模式时在此追加，列表筛选框与显示名自动保持一致
+const NOVEL_MODES = [
+  { value: 'outline', label: '大纲' },
+  { value: 'improv', label: '即兴' },
+  { value: 'dialog', label: '对话' },
+  { value: 'rewrite', label: '改写' },
+  { value: 'continue', label: '续写' },
+];
+
 // 创作模式显示名
 function modeLabel(m) {
-  return { 'outline': '大纲', 'improv': '即兴', 'dialog': '对话', 'rewrite': '改写', 'continue': '续写' }[m] || '大纲';
+  const item = NOVEL_MODES.find(x => x.value === m);
+  return item ? item.label : '大纲';
 }
 
 // 渲染一个小说卡片（供列表与垃圾箱复用）
@@ -1682,6 +1972,8 @@ function modelLabel(mid) {
 function newNovel() {
   state.novel = null;
   state.relations = [];
+  state.novelProfile = null;
+  state.novelProfileSource = '';
   currentNovelId = null;
   ['n-title', 'n-genre', 'n-style', 'n-reference', 'n-background', 'n-worldbuilding', 'n-source', 'n-task-instruction'].forEach(i => $(i).value = '');
   const srcInfo = $('n-source-info'); if (srcInfo) srcInfo.textContent = '';
@@ -1708,6 +2000,15 @@ function onModeChange() {
   }
   const srcBox = $('source-import-box');
   if (srcBox) srcBox.style.display = (mode === 'rewrite' || mode === 'continue') ? 'block' : 'none';
+  // 续写模式：故事背景/世界观/写作风格/参考小说文本直接继承原小说，无需手动填写
+  ['n-background', 'n-worldbuilding', 'n-style', 'n-reference'].forEach(id => {
+    const el = $(id);
+    if (el) {
+      const label = el.closest('label');
+      if (label) label.style.display = (mode === 'continue') ? 'none' : '';
+    }
+  });
+  renderSteps();
 }
 
 function goStep(n) {
@@ -1715,17 +2016,69 @@ function goStep(n) {
   renderSteps();
 }
 
+function getWizardSteps() {
+  const mode = $('n-mode') ? $('n-mode').value : 'outline';
+  return mode === 'continue' ? [1, 'analyze', 2, 3] : [1, 2, 3];
+}
+
+function nextStep() {
+  const steps = getWizardSteps();
+  const idx = steps.indexOf(state.wizardStep);
+  if (idx >= 0 && idx < steps.length - 1) goStep(steps[idx + 1]);
+}
+
+function prevStep() {
+  const steps = getWizardSteps();
+  const idx = steps.indexOf(state.wizardStep);
+  if (idx > 0) goStep(steps[idx - 1]);
+}
+
 function renderSteps() {
-  [1, 2, 3].forEach(i => {
-    const panel = $('step-' + i);
+  const mode = $('n-mode') ? $('n-mode').value : 'outline';
+  const isContinue = mode === 'continue';
+  const steps = getWizardSteps();
+
+  // 续写模式：显示 AI 拆解步骤指示器，更新后续编号
+  const dotAnalyze = $('step-dot-analyze');
+  if (dotAnalyze) dotAnalyze.style.display = isContinue ? '' : 'none';
+
+  const dot2 = $('step-dot-2');
+  if (dot2) dot2.textContent = isContinue ? '③ 角色设定' : '② 角色设定';
+  const dot3 = $('step-dot-3');
+  if (dot3) dot3.textContent = isContinue ? '④ 模型与提示词' : '③ 模型与提示词';
+
+  // 面板显隐
+  ['step-1', 'step-analyze', 'step-2', 'step-3'].forEach(id => {
+    const panel = $(id);
+    if (panel) panel.style.display = '';
+  });
+  if (!isContinue) {
+    const ap = $('step-analyze');
+    if (ap) ap.style.display = 'none';
+  }
+  // 非续写模式跳过 analyze
+  if (state.wizardStep === 'analyze' && !isContinue) {
+    state.wizardStep = 2;
+  }
+
+  [1, 'analyze', 2, 3].forEach(i => {
+    const panelId = i === 'analyze' ? 'step-analyze' : 'step-' + i;
+    const panel = $(panelId);
     if (panel) panel.style.display = (i === state.wizardStep) ? 'block' : 'none';
-    const dot = $('step-dot-' + i);
+
+    const dotId = i === 'analyze' ? 'step-dot-analyze' : 'step-dot-' + i;
+    const dot = $(dotId);
     if (dot) {
       dot.classList.toggle('active', i === state.wizardStep);
-      dot.classList.toggle('done', i < state.wizardStep);
+      const curIdx = steps.indexOf(state.wizardStep);
+      const thisIdx = steps.indexOf(i);
+      dot.classList.toggle('done', thisIdx >= 0 && curIdx >= 0 && thisIdx < curIdx);
     }
   });
-  if (state.wizardStep === 3) {
+
+  if (state.wizardStep === 'analyze') renderWizardAnalyzeBox();
+  if (state.wizardStep === 2) {
+    renderAnalyzedCharacters();
     renderCharacters();
     renderRelations();
   }
@@ -1743,10 +2096,10 @@ async function saveNovelBasics() {
     worldbuilding: $('n-worldbuilding').value.trim(),
     chapter_count: parseInt($('n-chapters').value) || 10,
     words_per_chapter: parseInt($('n-words').value) || 2000,
-    text_model_id: $('n-model').value || '',
     mode: $('n-mode').value || 'outline',
     source_text: $('n-source').value.trim(),
     task_instruction: $('n-task-instruction').value.trim(),
+    structured_profile: state.novelProfile ? JSON.stringify(state.novelProfile) : '',
   };
   try {
     if (state.novel) {
@@ -1761,13 +2114,13 @@ async function saveNovelBasics() {
     if (window.location.hash.includes('/new')) {
       history.replaceState(null, '', '#/novels/' + state.novel.id + '/edit');
     }
-    goStep(3);
     loadNovels();
   } catch (e) { toast(e.message, 'err'); }
 }
 
-async function saveNovelChars() {
-  if (!state.novel) return toast('请先完成基本信息', 'err');
+// 只保存角色设定（不跳转），供步骤2的「保存角色设定」按钮使用
+async function saveNovelCharsOnly() {
+  if (!state.novel) return toast('请先保存基本信息', 'err');
   const body = {
     character_ids: state.novel.character_ids || [],
     relationships: state.relations.filter(r => r.char1_id && r.char2_id && r.char1_id !== r.char2_id),
@@ -1779,17 +2132,36 @@ async function saveNovelChars() {
     state.novel = d.novel;
     toast('角色设定已保存', 'ok');
     loadNovels();
-    // 根据创作模式跳转：即兴 → 即兴写作页；对话 → 对话页；改写 → 改写页；续写 → 续写页；大纲 → 章节生成页
-    if (state.novel.mode === 'improv') {
-      nav('#/novels/' + state.novel.id + '/improv');
-    } else if (state.novel.mode === 'dialog') {
-      nav('#/novels/' + state.novel.id + '/dialog');
-    } else if (state.novel.mode === 'rewrite') {
-      nav('#/novels/' + state.novel.id + '/rewrite');
-    } else if (state.novel.mode === 'continue') {
-      nav('#/novels/' + state.novel.id + '/continue');
-    } else {
-      nav('#/novels/' + state.novel.id + '/generate');
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+// 保存模型选择 + 全局前置提示词；goNext 为 true 时保存后跳转到生成页
+async function saveNovelModelAndPrompt(goNext = false) {
+  if (!state.novel) return toast('请先保存基本信息', 'err');
+  try {
+    // 保存小说级模型选择
+    const modelId = $('n-model').value || '';
+    const d = await api('/api/novels/' + state.novel.id, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text_model_id: modelId }),
+    });
+    state.novel = d.novel;
+    // 保存全局前置提示词
+    await saveGlobalPrompt();
+    toast('模型与提示词已保存', 'ok');
+    if (goNext) {
+      // 根据创作模式跳转
+      if (state.novel.mode === 'improv') {
+        nav('#/novels/' + state.novel.id + '/improv');
+      } else if (state.novel.mode === 'dialog') {
+        nav('#/novels/' + state.novel.id + '/dialog');
+      } else if (state.novel.mode === 'rewrite') {
+        nav('#/novels/' + state.novel.id + '/rewrite');
+      } else if (state.novel.mode === 'continue') {
+        nav('#/novels/' + state.novel.id + '/continue');
+      } else {
+        nav('#/novels/' + state.novel.id + '/generate');
+      }
     }
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -1807,6 +2179,9 @@ async function openEditorPage(id) {
     $('n-background').value = state.novel.background || '';
     $('n-worldbuilding').value = state.novel.worldbuilding || '';
     $('n-source').value = state.novel.source_text || '';
+    try { state.novelProfile = state.novel.structured_profile ? JSON.parse(state.novel.structured_profile) : null; }
+    catch (e) { state.novelProfile = null; }
+    state.novelProfileSource = state.novel.source_text || '';
     $('n-task-instruction').value = state.novel.task_instruction || '';
     $('n-chapters').value = state.novel.chapter_count || 10;
     $('n-words').value = state.novel.words_per_chapter || 2000;
@@ -3052,7 +3427,13 @@ async function streamApi(path, onEvent, body) {
     headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
-  const res = await fetch(path, opts);
+  let res;
+  try {
+    res = await fetch(path, opts);
+  } catch (e) {
+    // 网络层错误（连接中断/代理超时等），转为友好中文提示
+    throw new Error('网络连接中断，请重试。若原文较长，可尝试稍后重试或检查网络/代理设置。');
+  }
   if (res.status === 401) {
     handleUnauthorized();
     throw new Error('未登录或登录已过期');
@@ -3069,9 +3450,16 @@ async function streamApi(path, onEvent, body) {
   const decoder = new TextDecoder('utf-8');
   let buf = '';
   while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buf += decoder.decode(value, { stream: true });
+    let chunk;
+    try {
+      const r = await reader.read();
+      if (r.done) break;
+      chunk = r.value;
+    } catch (e) {
+      // 读取 SSE 流时连接中断
+      throw new Error('网络连接中断，请重试。若原文较长，可尝试稍后重试或检查网络/代理设置。');
+    }
+    buf += decoder.decode(chunk, { stream: true });
     let idx;
     while ((idx = buf.indexOf('\n')) >= 0) {
       const line = buf.slice(0, idx).trim();
@@ -3425,7 +3813,6 @@ function applyGenreTemplate() {
   if (!gid) return;
   const g = (state.genres || []).find(x => x.id === gid);
   if (!g) return;
-  if (g.name && $('n-genre')) $('n-genre').value = g.name;
   if (g.style && $('n-style')) $('n-style').value = g.style;
   if (g.reference_text && $('n-reference')) $('n-reference').value = g.reference_text;
   toast('已套用题材「' + g.name + '」的风格与参考文本', 'ok');
@@ -3832,6 +4219,7 @@ function onSourceFilePicked(input) {
     const info = $('n-source-info');
     if (info) info.textContent = `已导入：${file.name}（${text.length} 字）`;
     toast('原文已导入', 'ok');
+    maybeAutoAnalyze();  // 清除旧的拆解结果
   };
   reader.onerror = () => toast('文件读取失败', 'err');
   reader.readAsText(file, 'utf-8');
@@ -4091,22 +4479,225 @@ async function generateContinueChapter() {
   toast('本章续写完成', 'ok');
 }
 
+// ===== 原著结构化拆解（续写模式） =====
+let editorAnalyzing = false;   // 编辑页自动拆解中
+
+// 模型偶尔把字段输出成数组/对象（提示词要求字符串），归一化为可读文本
+function profileVal(v) {
+  if (v == null) return '';
+  if (Array.isArray(v)) {
+    return v.map(x => (x && typeof x === 'object') ? JSON.stringify(x) : String(x ?? ''))
+      .map(s => s.trim()).filter(Boolean).join('；');
+  }
+  if (typeof v === 'object') {
+    return Object.entries(v)
+      .map(([k, x]) => `${k}：${(x && typeof x === 'object') ? JSON.stringify(x) : x}`)
+      .filter(Boolean).join('；');
+  }
+  return String(v);
+}
+
+// 生成档案主体 HTML（人物/世界观/主线/摘要），供编辑页与续写页共用
+function profileHTML(profile) {
+  const chars = profile.characters || [];
+  const ws = profile.world_setting || {};
+  const mf = profile.main_frame || {};
+  const sm = profile.summary || {};
+
+  const charCards = chars.length ? `
+    <h4 class="profile-h4">👥 人物档案（${chars.length}）</h4>
+    <div class="profile-char-grid">${chars.map(c => `
+      <div class="card profile-char">
+        <div class="row"><span class="title">👤 ${esc(c.name || '未命名')}</span></div>
+        ${profileVal(c.core_personality) ? `<div class="meta"><b>核心性格</b>：${esc(profileVal(c.core_personality))}</div>` : ''}
+        ${profileVal(c.speaking_style) ? `<div class="meta"><b>说话风格</b>：${esc(profileVal(c.speaking_style))}</div>` : ''}
+        ${profileVal(c.key_history) ? `<div class="meta"><b>重大经历</b>：${esc(profileVal(c.key_history))}</div>` : ''}
+        ${profileVal(c.relationship) ? `<div class="meta"><b>人物关系</b>：${esc(profileVal(c.relationship))}</div>` : ''}
+        ${profileVal(c.current_state) ? `<div class="meta"><b>当前状态</b>：${esc(profileVal(c.current_state))}</div>` : ''}
+        ${profileVal(c.taboo) ? `<div class="meta"><b>🚫 行为禁忌</b>：${esc(profileVal(c.taboo))}</div>` : ''}
+      </div>`).join('')}</div>` : '';
+
+  const wsRows = [
+    ['🌍 世界规则', profileVal(ws.world_rules)],
+    ['🗺️ 重要地域', profileVal(ws.geography)],
+    ['⚔️ 各大势力', profileVal(ws.forces)],
+    ['📖 专有名词', profileVal(ws.noun_glossary)],
+  ].filter(x => x[1]).map(x => `<div class="meta"><b>${x[0]}</b>：${esc(x[1])}</div>`).join('');
+  const wsCard = wsRows ? `<h4 class="profile-h4">🌐 世界观设定</h4><div class="card profile-block">${wsRows}</div>` : '';
+
+  const fg = Array.isArray(mf.foreshadowing_list) ? mf.foreshadowing_list : [];
+  const fgList = fg.length ? `<ul class="profile-list">${fg.map(x => `<li>${esc(profileVal(x))}</li>`).join('')}</ul>` : '';
+  const mfRows = [
+    ['🎯 核心主题', profileVal(mf.core_theme)],
+    ['🏁 主角长期目标', profileVal(mf.protagonist_goal)],
+    ['💥 核心矛盾', profileVal(mf.main_conflict)],
+    ['🎭 文风基调', profileVal(mf.story_tone)],
+  ].filter(x => x[1]).map(x => `<div class="meta"><b>${x[0]}</b>：${esc(x[1])}</div>`).join('');
+  const mfCard = (mfRows || fgList) ? `
+    <h4 class="profile-h4">🧭 主线框架</h4>
+    <div class="card profile-block">${mfRows}${fg.length ? `<div class="meta"><b>📌 待回收伏笔</b></div>${fgList}` : ''}</div>` : '';
+
+  const chSummaries = Array.isArray(sm.chapter_summaries) ? sm.chapter_summaries : [];
+  const chList = chSummaries.length ? `
+    <h4 class="profile-h4">📑 章节脉络（${chSummaries.length}）</h4>
+    <div class="card profile-block"><div class="profile-ch-grid">${chSummaries.map(cs => `
+      <div class="profile-ch"><span class="badge">${esc(profileVal(cs.chapter))}</span><span class="meta">${esc(profileVal(cs.brief))}</span></div>`).join('')}</div></div>` : '';
+
+  const smCard = (profileVal(sm.full_outline) ? `<h4 class="profile-h4">📜 全书脉络摘要</h4><div class="card profile-block"><div class="chapter-content">${esc(profileVal(sm.full_outline))}</div></div>` : '') + chList;
+
+  return charCards + wsCard + mfCard + smCard;
+}
+
+// 无状态拆解：调 /api/analyze-source，返回 profile dict
+async function analyzeSourceText(source) {
+  let profile = null;
+  let err = null;
+  await streamApi('/api/analyze-source', (ev) => {
+    if (ev.type === 'profile') profile = ev.profile;
+    else if (ev.type === 'error') err = new Error(ev.message);
+    else if (ev.type === 'progress') {
+      const sub = $('loading-sub');
+      if (sub && ev.message) sub.textContent = ev.message;
+      const wp = $('wizard-analyze-progress');
+      if (wp && ev.message) wp.textContent = ev.message;
+    }
+  }, { source_text: source, text_model_id: ($('n-model') ? $('n-model').value : '') });
+  if (err) throw err;
+  if (!profile) throw new Error('未收到拆解结果，请重试');
+  return profile;
+}
+
+// 编辑页：续写模式下原文变化时清除内存中的旧拆解结果（档案展示与重新拆解在第二步进行）
+function maybeAutoAnalyze() {
+  const mode = $('n-mode') ? $('n-mode').value : '';
+  if (mode !== 'continue') { state.novelProfile = null; state.novelProfileSource = ''; return; }
+  const source = ($('n-source').value || '').trim();
+  if (!source) {
+    if (state.novelProfile || state.novelProfileSource) {
+      state.novelProfile = null;
+      state.novelProfileSource = '';
+    }
+    return;
+  }
+  if (state.novelProfileSource && state.novelProfileSource !== source) {
+    state.novelProfile = null;
+    state.novelProfileSource = '';
+  }
+}
+
+// 编辑页向导第 2 步（AI 原著拆解）内容渲染：
+// 未拆解 → 开始按钮；已拆解 → 完整档案（人物/世界观/主线/摘要）+ 重新拆解按钮
+function renderWizardAnalyzeBox() {
+  const box = $('wizard-analyze-box');
+  if (!box || editorAnalyzing) return;
+  const profile = state.novelProfile;
+  if (profile && Object.keys(profile).length) {
+    box.innerHTML = `
+      <div class="row" style="margin-bottom:10px">
+        <span class="badge">✅ 已拆解</span>
+        <span class="spacer"></span>
+        <button class="btn" onclick="analyzeInWizard()">🔄 重新拆解</button>
+      </div>
+      ${profileHTML(profile)}`;
+  } else {
+    box.innerHTML = '<button class="btn primary" id="wizard-analyze-btn" onclick="analyzeInWizard()">🧠 开始拆解原著</button>';
+  }
+}
+
+// 编辑页向导：在第二步手动触发原著拆解
+async function analyzeInWizard() {
+  const source = ($('n-source').value || '').trim();
+  if (!source) return toast('请先在第一步导入原文', 'err');
+  if (editorAnalyzing) return;
+  editorAnalyzing = true;
+  const box = $('wizard-analyze-box');
+  if (box) box.innerHTML = '<div class="meta" id="wizard-analyze-progress" style="margin-top:10px">AI 正在通读全文，提取人物档案、世界观、主线框架与伏笔…</div>';
+  try {
+    state.novelProfileSource = source;
+    state.novelProfile = await analyzeSourceText(source);
+    // 已有小说：立即持久化档案，避免刷新/跳转后丢失（新建小说在首次保存时写入）
+    if (state.novel && state.novel.id) {
+      try {
+        const d = await api('/api/novels/' + state.novel.id, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ structured_profile: JSON.stringify(state.novelProfile) }),
+        });
+        state.novel = d.novel;
+      } catch (e) {
+        toast('档案已生成，但自动保存失败：' + e.message + '（请点击「保存基本信息」手动保存）', 'err');
+      }
+    }
+    toast('原著拆解完成', 'ok');
+  } catch (e) {
+    toast(e.message, 'err');
+    state.novelProfile = null;
+    state.novelProfileSource = '';
+  } finally {
+    editorAnalyzing = false;
+    renderWizardAnalyzeBox();
+  }
+}
+
+// 角色设定步骤顶部展示 AI 拆解出的前 5 个角色
+function renderAnalyzedCharacters() {
+  const box = $('analyzed-chars-box');
+  if (!box) return;
+  const mode = $('n-mode') ? $('n-mode').value : '';
+  const profile = state.novelProfile;
+  if (mode !== 'continue' || !profile || !profile.characters || !profile.characters.length) {
+    box.innerHTML = '';
+    return;
+  }
+  const top = profile.characters.slice(0, 5);
+  box.innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <div class="row"><span class="title">🧠 AI 拆解主要角色（前 ${top.length} 位）</span></div>
+      <div class="profile-char-grid" style="margin-top:10px">
+        ${top.map(c => `
+          <div class="card profile-char">
+            <div class="row"><span class="title">👤 ${esc(c.name || '未命名')}</span></div>
+            ${profileVal(c.core_personality) ? `<div class="meta"><b>核心性格</b>：${esc(profileVal(c.core_personality))}</div>` : ''}
+            ${profileVal(c.speaking_style) ? `<div class="meta"><b>说话风格</b>：${esc(profileVal(c.speaking_style))}</div>` : ''}
+            ${profileVal(c.relationship) ? `<div class="meta"><b>人物关系</b>：${esc(profileVal(c.relationship))}</div>` : ''}
+            ${profileVal(c.current_state) ? `<div class="meta"><b>当前状态</b>：${esc(profileVal(c.current_state))}</div>` : ''}
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
 // ============ 初始化 ============
 (async function init() {
+  // 加载版本号（公开接口，无需登录）
+  try {
+    const v = await fetch('/api/version').then(r => r.json());
+    const el = $('app-version');
+    if (el) el.textContent = v.version;
+  } catch (_) {}
+
+  // 登录表单 Enter 键支持
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      if (e.target.id === 'login-password' || e.target.id === 'login-username') doLogin();
+      else if (e.target.id === 'reg-password' || e.target.id === 'reg-password2' || e.target.id === 'reg-username') doRegister();
+    }
+  });
+
   // 未登录：直接进入登录页，不加载数据
   if (!authToken) {
     await router();
     return;
   }
   try {
+    // 恢复当前用户信息
+    const me = await api('/api/auth/me');
+    currentUser = me;
+    updateUserUI();
     await loadSettings();
     await loadProviders();
-    await loadCharacters();
+    await loadAllCharacters();
     await loadGenres();
-    // 根据 hash 路由进入对应视图
     await router();
   } catch (e) {
-    // 401 等认证错误已由 api() 处理跳转登录
     if (authToken) {
       toast('初始化失败：' + e.message, 'err');
     }

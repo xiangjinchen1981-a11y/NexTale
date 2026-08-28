@@ -495,7 +495,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 }
 
 .step-indicator { display: flex; gap: 8px; margin: 16px 0; flex-wrap: wrap; }
-.step { padding: 8px 16px; border-radius: 999px; background: var(--card); border: 1px solid var(--border); color: var(--muted); font-size: 14px; }
+.step { padding: 8px 16px; border-radius: 999px; background: var(--card); border: 1px solid var(--border); color: var(--muted); font-size: 14px; cursor: pointer; user-select: none; }
+.step:hover { border-color: var(--accent); }
 .step.active { background: var(--accent); color: #fff; border-color: var(--accent); }
 .step.done { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-soft); }
 .step-panel { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 12px; }
@@ -630,6 +631,80 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 }
 .login-card .btn { width: 100%; }
 
+.user-badge {
+  padding: 4px 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 16px;
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.user-badge::after {
+  content: "▾";
+  font-size: 10px;
+  opacity: 0.7;
+}
+.user-dropdown {
+  position: relative;
+}
+.user-dropdown-menu {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 6px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  min-width: 120px;
+  z-index: 100;
+  overflow: hidden;
+}
+.user-dropdown-menu.open {
+  display: block;
+}
+.user-dropdown-item {
+  display: block;
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.user-dropdown-item:hover {
+  background: var(--hover);
+}
+.user-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--card);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.user-table th, .user-table td {
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.user-table th {
+  background: var(--subtle-bg);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--muted);
+}
+.btn-sm { padding: 4px 10px; font-size: 12px; margin-right: 4px; }
+.btn-danger { color: var(--danger); border-color: var(--danger); }
+.btn-danger:hover { background: var(--danger); color: #fff; }
+
 /* 主题切换按钮 */
 .theme-toggle {
   border: none;
@@ -653,6 +728,13 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   margin-top: 8px;
 }
 .improv-chapter-card { margin-bottom: 14px; }
+
+/* 续写页：本章续写要求输入框撑满卡片宽度 */
+.continue-input-card textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+}
 .improv-title-input {
   flex: 1;
   min-width: 160px;
@@ -1154,6 +1236,70 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   word-break: break-word;
 }
 
+/* ============ 角色库筛选 ============ */
+.character-filter-row {
+  margin: 12px 0 8px;
+}
+.character-filter-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.character-filter-label select {
+  width: 400px;
+  max-width: 100%;
+  padding: 8px 12px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card, #fff);
+  color: var(--text);
+}
+
+/* 角色选择面板（从角色库勾选已有角色） */
+.character-picker-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.character-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.character-picker-item:hover { border-color: var(--accent); }
+.character-picker-item input[type="checkbox"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+.character-picker-item .char-cover-ph,
+.character-picker-item img {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+.character-picker-name {
+  font-size: 14px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ============ 照片裁剪器 ============ */
 .crop-overlay {
   position: fixed;
@@ -1239,4 +1385,49 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   object-fit: cover;
   border-radius: 6px;
   border: 1px solid var(--border);
+}
+
+/* ============ 原著故事档案（续写模式拆解结果） ============ */
+.profile-wrap .meta { margin-top: 6px; line-height: 1.7; word-break: break-all; }
+.profile-h4 {
+  margin: 18px 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  border-left: 3px solid var(--accent);
+  padding-left: 8px;
+}
+.profile-char-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 8px;
+}
+.profile-char { padding: 14px 16px; }
+.profile-char .title { font-size: 15px; }
+.profile-block { margin-top: 8px; }
+.profile-list { margin: 8px 0 0 18px; padding: 0; }
+.profile-list li { margin: 4px 0; line-height: 1.6; }
+.profile-ch-grid { display: flex; flex-direction: column; gap: 6px; }
+.profile-ch { display: flex; align-items: baseline; gap: 10px; }
+.profile-ch .badge { flex-shrink: 0; }
+
+/* ── Footer ── */
+.app-footer {
+  text-align: center;
+  padding: 16px 20px;
+  font-size: 12px;
+  color: var(--text-muted, #999);
+  border-top: 1px solid var(--border, #e5e5e5);
+  margin-top: 24px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+}
+.footer-version {
+  opacity: 0.7;
+}
+.footer-version::before {
+  content: "v";
 }

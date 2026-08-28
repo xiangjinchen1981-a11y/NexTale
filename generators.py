@@ -1,7 +1,14 @@
 """小说生成引擎：风格分析、大纲生成、逐章创作、前情提要维护。"""
+import json
 import re
 
 from ai_client import chat_text, chat_text_stream, chat_vision, AIClientError
+
+def _uid(context):
+    """从 context 提取 user_id（用于日志归属）。"""
+    return context.get("_user_id", "") if isinstance(context, dict) else ""
+
+
 from prompts import get_prompt
 
 
@@ -83,7 +90,7 @@ def analyze_photo(context, image_base64):
     provider, model, mcfg = _resolve(context, "vision")
     prompt = get_prompt(context, "analyze_photo")
     content, _ = chat_vision(provider, model, _prepend_global(context, prompt), image_base64,
-                             temperature=_temperature(context, mcfg), name="分析照片")
+                             temperature=_temperature(context, mcfg), name="分析照片", user_id=_uid(context))
     appearance, personality = _parse_two_fields(content)
     return {"appearance": appearance, "personality": personality}
 
@@ -96,7 +103,7 @@ def analyze_style(context, reference_text):
     ref = reference_text[: limit if limit else 6000]
     prompt = get_prompt(context, "analyze_style").format(ref=ref)
     content, _ = chat_text(provider, model, _messages(context, prompt),
-                           temperature=_temperature(context, mcfg), name="分析风格")
+                           temperature=_temperature(context, mcfg), name="分析风格", user_id=_uid(context))
     return content.strip()
 
 
@@ -126,7 +133,7 @@ def generate_outline(context, novel):
         relationships=relationships_info,
     )
     content, _ = chat_text(provider, model, _messages(context, prompt),
-                           temperature=_temperature(context, mcfg), name="生成大纲")
+                           temperature=_temperature(context, mcfg), name="生成大纲", user_id=_uid(context))
     return _parse_outline(content, novel.get("chapter_count", 10))
 
 
@@ -211,6 +218,7 @@ def generate_chapter(context, novel, chapter_index):
         temperature=_temperature(context, mcfg),
         max_tokens=max_tokens,
         name="生成章节",
+        user_id=_uid(context),
     )
     content = content.strip()
 
@@ -235,7 +243,7 @@ def stream_chapter(context, novel, chapter_index):
     for delta in chat_text_stream(
             provider, model, _messages(context, prompt),
             temperature=_temperature(context, mcfg),
-            max_tokens=max_tokens, name="生成章节"):
+            max_tokens=max_tokens, name="生成章节", user_id=_uid(context)):
         parts.append(delta)
         yield {"type": "delta", "content": delta}
 
@@ -331,7 +339,7 @@ def improv_chapter_stream(context, novel, chapter_index, instruction, context_ch
     for delta in chat_text_stream(
             provider, model, _messages(context, prompt),
             temperature=_temperature(context, mcfg),
-            max_tokens=max_tokens, name="生成章节"):
+            max_tokens=max_tokens, name="生成章节", user_id=_uid(context)):
         parts.append(delta)
         yield {"type": "delta", "content": delta}
 
@@ -362,7 +370,7 @@ def summarize_chapter_content(context, content, chapter_index, max_retries=2):
         try:
             s, _ = chat_text(provider, model, _messages(context, prompt),
                              temperature=_temperature(context, mcfg), max_tokens=300,
-                             name="生成摘要")
+                             name="生成摘要", user_id=_uid(context))
             if s and s.strip():
                 return s.strip()
             last_err = "模型返回空内容"
@@ -377,7 +385,7 @@ def condense_progress(context, progress_summary):
     prompt = get_prompt(context, "condense_progress").format(
         content=progress_summary[-8000:])
     s, _ = chat_text(provider, model, _messages(context, prompt),
-                     temperature=_temperature(context, mcfg), max_tokens=2000, name="浓缩前情")
+                     temperature=_temperature(context, mcfg), max_tokens=2000, name="浓缩前情", user_id=_uid(context))
     return s.strip()
 
 
@@ -718,7 +726,7 @@ def dialog_stream(context, novel, user_text, history, word_limit=500):
     for delta in chat_text_stream(
             provider, model, _messages(context, prompt),
             temperature=_temperature(context, mcfg),
-            max_tokens=max_tokens, name="对话推进"):
+            max_tokens=max_tokens, name="对话推进", user_id=_uid(context)):
         yield {"type": "delta", "content": delta}
 
 
@@ -820,7 +828,7 @@ def rewrite_chapter_stream(context, novel, chapter_index):
     for delta in chat_text_stream(
             provider, model, _messages(context, prompt),
             temperature=_temperature(context, mcfg),
-            max_tokens=max_tokens, name="改写章节"):
+            max_tokens=max_tokens, name="改写章节", user_id=_uid(context)):
         parts.append(delta)
         yield {"type": "delta", "content": delta}
     content = "".join(parts).strip()
@@ -838,10 +846,7 @@ def _continue_prompt(context, novel, chapter_index, instruction):
 
     chars = _format_characters(context, novel)
     rels = _format_relationships(context, novel)
-    style = novel.get("style") or "文笔流畅自然，情节紧凑，人物鲜明。"
     genre = novel.get("genre") or "不限"
-    worldbuilding = novel.get("worldbuilding") or "（暂无世界观设定）"
-    background = novel.get("background") or "（暂无背景设定）"
 
     limit = _context_limit(context, mcfg, max_tokens) or 12000
     # 原文保留「结尾」部分（续写需承接结尾），而非开头
@@ -860,13 +865,14 @@ def _continue_prompt(context, novel, chapter_index, instruction):
         instruction=instruction or "自然承接原文结尾，推进剧情。",
         source=source or "（无导入原文）",
         prev=prev,
-        style=style,
-        world=worldbuilding,
         chars=chars,
         rels=rels,
-        background=background,
         words=words,
     )
+    # 已拆解的结构化故事档案优先注入，保证续写一致性（人物/世界观/主线/伏笔/摘要）
+    profile_text = _format_profile(_load_profile(novel))
+    if profile_text:
+        prompt += "\n\n【原著故事档案（拆解结果，续写必须严格遵守，不得违背/重定义/新增设定）】\n" + profile_text
     wb_context = f"{instruction} {source[-500:]} {prev[-500:]}"
     wb_text = _format_worldbooks(context, only_constant=False, context_text=wb_context)
     if wb_text:
@@ -882,12 +888,399 @@ def continue_chapter_stream(context, novel, chapter_index, instruction=""):
     for delta in chat_text_stream(
             provider, model, _messages(context, prompt),
             temperature=_temperature(context, mcfg),
-            max_tokens=max_tokens, name="续写章节"):
+            max_tokens=max_tokens, name="续写章节", user_id=_uid(context)):
         parts.append(delta)
         yield {"type": "delta", "content": delta}
     content = "".join(parts).strip()
     yield {"type": "chapter_done", "content": content, "word_count": _count_chinese(content)}
     yield {"type": "summary", "summary": _summarize_chapter(context, content, chapter_index)}
+
+
+# ---------- 原著结构化拆解（续写模式） ----------
+
+def _extract_json(text):
+    """从模型输出中提取 JSON 对象（剥掉代码围栏、修复常见格式问题）。"""
+    text = (text or "").strip()
+    if not text:
+        raise AIClientError(
+            "模型未返回任何内容（常见于推理类模型把输出额度全部用于思考过程）。"
+            "请在「API 配置」中为该模型设置更大的 max_tokens（如 32768）后重试")
+
+    candidates = [text]
+
+    # 1. 剥掉 ```json ... ``` 代码围栏
+    m = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.S)
+    if m:
+        candidates.append(m.group(1).strip())
+
+    # 1b. 输出被截断时围栏可能未闭合：剥掉开头围栏行后再尝试解析
+    m_open = re.match(r"\s*```(?:json)?\s*\n?", text)
+    if m_open:
+        stripped = re.sub(r"```\s*$", "", text[m_open.end():]).strip()
+        if stripped:
+            candidates.append(stripped)
+
+    # 2. 用括号配对提取首个 { 到匹配的 }（比 rfind 更可靠）
+    start = text.find("{")
+    if start != -1:
+        depth = 0
+        in_str = False
+        esc = False
+        end = -1
+        for i in range(start, len(text)):
+            ch = text[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+            else:
+                if ch == '"':
+                    in_str = True
+                elif ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i
+                        break
+        if end != -1:
+            candidates.append(text[start:end + 1])
+
+    # 3. 逐个候选尝试解析
+    last_err = None
+    for cand in candidates:
+        cand = cand.strip()
+        if not cand:
+            continue
+        # 3a. 直接解析
+        try:
+            return json.loads(cand)
+        except ValueError as e:
+            last_err = e
+        # 3b. 去掉尾逗号（对象/数组内）
+        fixed = re.sub(r",\s*([}\]])", r"\1", cand)
+        if fixed != cand:
+            try:
+                return json.loads(fixed)
+            except ValueError as e:
+                last_err = e
+        # 3c. 去掉注释（// 和 /* */）
+        no_comment = re.sub(r"//[^\n]*", "", cand)
+        no_comment = re.sub(r"/\*.*?\*/", "", no_comment, flags=re.S)
+        if no_comment != cand:
+            try:
+                return json.loads(no_comment)
+            except ValueError as e:
+                last_err = e
+                no_comment2 = re.sub(r",\s*([}\]])", r"\1", no_comment)
+                try:
+                    return json.loads(no_comment2)
+                except ValueError as e2:
+                    last_err = e2
+        # 3d. 补全被截断的 JSON（仅缺少结尾的闭合括号，字符串未被截断时有效）
+        completed = _try_complete_truncated_json(cand)
+        if completed is not None:
+            return completed
+
+    if last_err is not None:
+        raise AIClientError(f"拆解结果 JSON 解析失败：{last_err}")
+    raise AIClientError("模型未返回有效的 JSON 结构")
+
+
+def _extract_json_safe(content):
+    """拆解结果解析：失败时给出更明确的可操作提示。"""
+    try:
+        return _extract_json(content)
+    except AIClientError as e:
+        # 判断是否疑似 token 截断（内容以逗号/冒号/未闭合引号结尾）
+        tail = (content or "").rstrip()[-40:]
+        if re.search(r"[,\"\[\{：:，]$", tail) or "Unterminated" in str(e):
+            raise AIClientError(
+                "拆解结果不完整（可能因模型输出长度被截断）。建议："
+                "① 在配置里调大该模型的 max_tokens；"
+                "② 对较长原文采用分块拆解。原始错误：" + str(e))
+        raise
+
+
+def _try_complete_truncated_json(text):
+    """尝试补全因 max_tokens 截断而缺少结尾括号的 JSON。
+
+    仅在字符串值未被截断（最后一个非空白字符是逗号/冒号/括号等）时，
+    按括号配对补齐缺失的 ] 和 } 后重新解析。无法安全补全时返回 None。
+    """
+    text = (text or "").rstrip()
+    if not text:
+        return None
+    # 统计 {} 和 [] 的未闭合深度（跳过字符串内字符）
+    obj_depth = 0   # {
+    arr_depth = 0   # [
+    in_str = False
+    esc = False
+    for ch in text:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        else:
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                obj_depth += 1
+            elif ch == "}":
+                obj_depth -= 1
+            elif ch == "[":
+                arr_depth += 1
+            elif ch == "]":
+                arr_depth -= 1
+    if in_str:
+        return None  # 字符串被截断，无法安全补全
+    if obj_depth <= 0 and arr_depth <= 0:
+        return None  # 括号已平衡，无需补全（说明是其他错误）
+    # 去掉末尾可能残留的逗号（截断通常停在逗号后），再补上缺失的闭合括号
+    base = text.rstrip()
+    base = re.sub(r",\s*$", "", base)
+    completed = base + ("]" * max(arr_depth, 0)) + ("}" * max(obj_depth, 0))
+    try:
+        return json.loads(completed)
+    except ValueError:
+        return None
+
+
+def _load_profile(novel):
+    """读取小说已保存的结构化档案（JSON 字符串 → dict），无则返回 None。"""
+    raw = (novel or {}).get("structured_profile") or ""
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+
+
+def _norm_text(v):
+    """把模型偶尔输出的数组/对象字段归一化为可读文本（提示词要求字符串，
+    但模型有时会返回 list/dict，直接拼接会得到 repr 或引发 AttributeError）。"""
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v.strip()
+    if isinstance(v, list):
+        return "；".join(x for x in (_norm_text(i) for i in v) if x)
+    if isinstance(v, dict):
+        return "；".join(f"{k}：{_norm_text(x)}" for k, x in v.items())
+    return str(v).strip()
+
+
+def _format_profile(profile):
+    """把结构化故事档案格式化为续写 prompt 的上下文块（空档案返回空串）。"""
+    if not isinstance(profile, dict):
+        return ""
+    parts = []
+
+    chars = profile.get("characters") or []
+    if chars:
+        lines = ["【人物档案】"]
+        for c in chars:
+            if not isinstance(c, dict):
+                continue
+            fields = [
+                f"性格：{_norm_text(c.get('core_personality'))}",
+                f"说话：{_norm_text(c.get('speaking_style'))}",
+                f"经历：{_norm_text(c.get('key_history'))}",
+                f"关系：{_norm_text(c.get('relationship'))}",
+                f"现状：{_norm_text(c.get('current_state'))}",
+                f"禁忌：{_norm_text(c.get('taboo'))}",
+            ]
+            lines.append(f"· {c.get('name', '?')}｜" + "；".join(
+                f for f in fields if f.split('：', 1)[-1].strip()))
+        parts.append("\n".join(lines))
+
+    ws = profile.get("world_setting") or {}
+    if isinstance(ws, dict):
+        ws_lines = []
+        for k, label in [("world_rules", "世界规则"), ("geography", "重要地域"),
+                         ("forces", "各大势力"), ("noun_glossary", "专有名词")]:
+            v = _norm_text(ws.get(k))
+            if v:
+                ws_lines.append(f"{label}：{v}")
+        if ws_lines:
+            parts.append("【世界观设定】\n" + "\n".join(ws_lines))
+
+    mf = profile.get("main_frame") or {}
+    if isinstance(mf, dict):
+        fg_txt = _norm_text(mf.get("foreshadowing_list"))
+        mf_lines = [
+            f"核心主题：{_norm_text(mf.get('core_theme'))}",
+            f"主角长期目标：{_norm_text(mf.get('protagonist_goal'))}",
+            f"核心矛盾：{_norm_text(mf.get('main_conflict'))}",
+            f"文风基调：{_norm_text(mf.get('story_tone'))}",
+            f"待回收伏笔：{fg_txt}",
+        ]
+        parts.append("【主线框架】\n" + "\n".join(mf_lines))
+
+    sm = profile.get("summary") or {}
+    if isinstance(sm, dict):
+        outline = _norm_text(sm.get("full_outline"))
+        if outline:
+            parts.append("【全书脉络摘要】\n" + outline)
+
+    return "\n\n".join(parts)
+
+
+def _split_source_blocks(source, block_chars):
+    """把原文切成若干块，尽量在段落边界切分（超长段落则硬切）。"""
+    source = source.strip()
+    if len(source) <= block_chars:
+        return [source]
+    blocks = []
+    cur = ""
+    for para in re.split(r"\n\s*\n", source):
+        while len(para) > block_chars:
+            if cur:
+                blocks.append(cur)
+                cur = ""
+            blocks.append(para[:block_chars])
+            para = para[block_chars:]
+        if cur and len(cur) + len(para) + 2 > block_chars:
+            blocks.append(cur)
+            cur = para
+        else:
+            cur = (cur + "\n\n" + para) if cur else para
+    if cur:
+        blocks.append(cur)
+    return [b for b in blocks if b.strip()]
+
+
+def _merge_profiles(partials):
+    """把多个分块拆解的局部档案合并为一份全局档案。"""
+    merged = {
+        "characters": [],
+        "world_setting": {},
+        "main_frame": {"foreshadowing_list": []},
+        "summary": {"full_outline": "", "chapter_summaries": []},
+    }
+    char_by_name = {}
+    ws = {}
+    mf = {}
+    fg = []
+    fg_seen = set()
+    outlines = []
+    ch_sums = []
+    ch_seen = set()
+
+    for p in partials:
+        if not isinstance(p, dict):
+            continue
+        # 人物：按 name 合并，同名字段拼接
+        for c in (p.get("characters") or []):
+            if not isinstance(c, dict) or not (c.get("name") or "").strip():
+                continue
+            name = c["name"].strip()
+            if name not in char_by_name:
+                char_by_name[name] = {
+                    "name": name, "core_personality": "", "speaking_style": "",
+                    "key_history": "", "relationship": "", "current_state": "", "taboo": "",
+                }
+            dst = char_by_name[name]
+            for k in ["core_personality", "speaking_style", "key_history",
+                      "relationship", "current_state", "taboo"]:
+                v = _norm_text(c.get(k))
+                if v and v not in dst[k]:
+                    dst[k] = (dst[k] + "；" + v) if dst[k] else v
+        # 世界观：各字段拼接（去重）
+        w = p.get("world_setting") or {}
+        for k in ["world_rules", "geography", "forces", "noun_glossary"]:
+            v = _norm_text(w.get(k))
+            if v and v not in ws.get(k, ""):
+                ws[k] = (ws[k] + "；" + v) if ws.get(k) else v
+        # 主线框架：核心字段取第一个非空（全书级），伏笔拼接去重
+        m = p.get("main_frame") or {}
+        for k in ["core_theme", "protagonist_goal", "main_conflict", "story_tone"]:
+            v = _norm_text(m.get(k))
+            if v and not mf.get(k):
+                mf[k] = v
+        fl = m.get("foreshadowing_list") or []
+        if isinstance(fl, list):
+            for x in fl:
+                s = _norm_text(x)
+                if s and s not in fg_seen:
+                    fg_seen.add(s)
+                    fg.append(s)
+        # 摘要：outline 拼接，章节摘要去重
+        s = p.get("summary") or {}
+        if isinstance(s, dict):
+            outline = _norm_text(s.get("full_outline"))
+            if outline:
+                outlines.append(outline)
+            for cs in (s.get("chapter_summaries") or []):
+                if not isinstance(cs, dict):
+                    continue
+                key = _norm_text(cs.get("chapter"))
+                brief = _norm_text(cs.get("brief"))
+                if brief and key not in ch_seen:
+                    ch_seen.add(key)
+                    ch_sums.append({"chapter": key, "brief": brief})
+
+    merged["characters"] = list(char_by_name.values())
+    merged["world_setting"] = ws
+    if mf:
+        mf["foreshadowing_list"] = fg
+        merged["main_frame"] = mf
+    merged["summary"]["full_outline"] = "\n".join(outlines)
+    merged["summary"]["chapter_summaries"] = ch_sums
+    return merged
+
+
+def analyze_source_profile(context, novel, on_progress=None):
+    """对原著全文做结构化拆解；超长时分块拆解再合并。
+
+    on_progress(step, total, message) 用于进度反馈（可选）。
+    返回 dict（characters/world_setting/main_frame/summary）。
+    """
+    provider, model, mcfg = _resolve(context, "text")
+    source = (novel.get("source_text") or "").strip()
+    if not source:
+        raise AIClientError("尚未导入原文，无法拆解")
+    # 拆解输出 JSON 较大（人物+世界观+主线+摘要）；推理类模型的思考过程也计入
+    # max_tokens 额度，额度过小会导致结果被截断甚至返回空内容，默认预留 32768
+    max_tokens = int(mcfg.get("max_tokens") or 32768)
+    limit = _context_limit(context, mcfg, max_tokens)
+    # 每块原文上限（字符）：留出提示词 + 输出 token 的余量；未配置上下文时用保守默认
+    block_chars = max(limit - 3000, 6000) if limit else 50000
+
+    if len(source) <= block_chars:
+        if on_progress:
+            on_progress(0, 1, "正在通读全文，提取故事档案…")
+        prompt = get_prompt(context, "analyze_source").format(source=source)
+        content, _ = chat_text(
+            provider, model, _messages(context, prompt),
+            temperature=0.3, max_tokens=max_tokens, name="原著结构化拆解", user_id=_uid(context))
+        if on_progress:
+            on_progress(1, 1, "拆解完成，正在整理结果…")
+        return _extract_json_safe(content)
+
+    # 超长：分块拆解 + 合并
+    blocks = _split_source_blocks(source, block_chars)
+    partials = []
+    total = len(blocks)
+    for i, blk in enumerate(blocks, 1):
+        if on_progress:
+            on_progress(i, total, f"正在拆解第 {i}/{total} 块（约 {_count_chinese(blk)} 字）…")
+        prompt = get_prompt(context, "analyze_source_partial").format(block=blk)
+        content, _ = chat_text(
+            provider, model, _messages(context, prompt),
+            temperature=0.3, max_tokens=max_tokens, name=f"原著分块拆解 {i}/{total}",
+            user_id=_uid(context))
+        partials.append(_extract_json_safe(content))
+    if on_progress:
+        on_progress(total, total, "正在合并各块档案…")
+    return _merge_profiles(partials)
 
 
 

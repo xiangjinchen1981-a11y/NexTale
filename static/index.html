@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>织叙-NexTale</title>
-  <link rel="stylesheet" href="style.css?v=20260826m">
+  <link rel="stylesheet" href="style.css?v=20260828a">
 </head>
 <body>
   <header class="topbar">
@@ -19,8 +19,14 @@
     </nav>
     <span class="spacer"></span>
     <button class="btn" id="btn-providers" onclick="nav('#/providers')">配置</button>
+    <button class="btn" id="btn-users" onclick="nav('#/users')" style="display:none">用户管理</button>
     <button class="btn theme-toggle" id="btn-theme" onclick="toggleTheme()" title="切换夜间模式">🌙</button>
-    <button class="btn" id="btn-logout" onclick="logout()" style="display:none">退出登录</button>
+    <div class="user-dropdown" id="user-dropdown" style="display:none">
+      <button class="user-badge" id="user-badge" onclick="toggleUserDropdown()"></button>
+      <div class="user-dropdown-menu" id="user-dropdown-menu">
+        <button class="user-dropdown-item" onclick="logout()">退出登录</button>
+      </div>
+    </div>
   </header>
 
   <main class="container">
@@ -28,10 +34,38 @@
     <section id="view-login" class="view">
       <div class="login-card">
         <h2>登录</h2>
-        <p class="hint" id="login-hint">请输入访问密码</p>
-        <input id="login-password" type="password" placeholder="访问密码" autocomplete="current-password">
+        <p class="hint" id="login-hint">请输入用户名和密码</p>
+        <input id="login-username" type="text" placeholder="用户名" autocomplete="username">
+        <input id="login-password" type="password" placeholder="密码" autocomplete="current-password">
         <button class="btn primary" onclick="doLogin()" id="login-btn">登录</button>
       </div>
+      <div class="login-card" id="register-card" style="display:none">
+        <h2>创建管理员</h2>
+        <p class="hint">首次使用，请创建管理员账号</p>
+        <input id="reg-username" type="text" placeholder="用户名" autocomplete="username">
+        <input id="reg-password" type="password" placeholder="密码（至少4位）" autocomplete="new-password">
+        <input id="reg-password2" type="password" placeholder="确认密码" autocomplete="new-password">
+        <button class="btn primary" onclick="doRegister()">创建并登录</button>
+      </div>
+    </section>
+
+    <!-- ============ 用户管理视图 ============ -->
+    <section id="view-users" class="view">
+      <div class="page-head">
+        <h2>用户管理</h2>
+      </div>
+      <div class="card" style="margin-bottom:1.5rem">
+        <h3>创建用户</h3>
+        <div style="display:flex;gap:.8rem;flex-wrap:wrap;align-items:end">
+          <div><label>用户名</label><input id="new-username" type="text" placeholder="用户名"></div>
+          <div><label>密码</label><input id="new-password" type="password" placeholder="密码"></div>
+          <div><label>角色</label>
+            <select id="new-role"><option value="user">普通用户</option><option value="admin">管理员</option></select>
+          </div>
+          <button class="btn primary" onclick="createUser()">创建</button>
+        </div>
+      </div>
+      <div id="user-list"></div>
     </section>
 
     <!-- ============ 配置（视图） ============ -->
@@ -210,7 +244,14 @@
         <span class="spacer"></span>
         <button class="btn primary" onclick="goAddCharacterFromList()">＋ 添加角色</button>
       </div>
-      <p class="hint">以照片卡片展示全部角色，点击卡片进入详情页查看与编辑。</p>
+      <div class="character-filter-row">
+        <label class="character-filter-label">小说名称
+          <select id="character-novel-filter" onchange="onCharacterNovelFilter()">
+            <option value="">最新角色（默认）</option>
+          </select>
+        </label>
+      </div>
+      <p class="hint" id="character-grid-hint">展示最新的角色。</p>
       <div id="character-grid" class="char-grid"></div>
     </section>
 
@@ -319,11 +360,7 @@
           </select>
         </label>
         <label>创作模式
-          <select id="novel-mode-filter" onchange="renderNovels()">
-            <option value="">全部</option>
-            <option value="improv">即兴</option>
-            <option value="outline">大纲</option>
-          </select>
+          <select id="novel-mode-filter" onchange="renderNovels()"></select>
         </label>
         <label>模型
           <select id="novel-model-filter" onchange="renderNovels()">
@@ -377,31 +414,14 @@
       </div>
 
       <div class="step-indicator">
-        <span class="step" id="step-dot-1">① 创作模型与提示词</span>
-        <span class="step" id="step-dot-2">② 基本信息</span>
-        <span class="step" id="step-dot-3">③ 角色设定</span>
+        <span class="step" id="step-dot-1" onclick="goStep(1)">① 基本信息</span>
+        <span class="step" id="step-dot-analyze" onclick="goStep('analyze')" style="display:none">② AI 原著拆解</span>
+        <span class="step" id="step-dot-2" onclick="goStep(2)">② 角色设定</span>
+        <span class="step" id="step-dot-3" onclick="goStep(3)">③ 模型与提示词</span>
       </div>
 
-      <!-- 步骤 1：创作模型 + 全局前置提示词 -->
+      <!-- 步骤 1：基本信息 -->
       <div id="step-1" class="step-panel">
-        <h3>创作模型与前置提示词</h3>
-        <div class="form-grid">
-          <label>创作模型
-            <select id="n-model"></select>
-          </label>
-        </div>
-        <div class="card global-prompt-card">
-          <span class="title">全局前置提示词</span>
-          <p class="hint">对所有 AI 生成（大纲、章节正文、风格分析、人物照片分析）统一生效的创作指令，例如：全文使用古文对话、避免现代词汇、整体基调偏喜剧等。留空则不加。</p>
-          <textarea id="global-prompt" rows="8" placeholder=""></textarea>
-        </div>
-        <div style="margin-top:16px">
-          <button class="btn primary" onclick="saveGlobalPrompt(); goStep(2)">下一步：基本信息 →</button>
-        </div>
-      </div>
-
-      <!-- 步骤 2：基本信息 -->
-      <div id="step-2" class="step-panel" style="display:none">
         <h3>基本信息</h3>
         <div class="form-grid">
           <label>小说标题
@@ -460,16 +480,45 @@
           <textarea id="n-reference" rows="5" placeholder="粘贴参考小说片段…（可选）"></textarea>
         </label>
         <div style="margin-top:16px">
-          <button class="btn" onclick="goStep(1)">← 上一步</button>
-          <button class="btn primary" onclick="saveNovelBasics()">下一步：角色设定 →</button>
+          <button class="btn primary" onclick="saveNovelBasics()">保存基本信息</button>
+          <button class="btn" onclick="nextStep()">下一步 →</button>
+        </div>
+      </div>
+
+      <!-- 步骤 2：AI 原著拆解（仅续写模式） -->
+      <div id="step-analyze" class="step-panel" style="display:none">
+        <h3>AI 原著拆解</h3>
+        <p class="hint">AI 将通读全文，提取人物档案、世界观、主线框架与脉络摘要，拆解结果将在本页完整展示（主要角色同时展示在下一步的角色设定中）。拆解结果会自动保存，续写时严格遵循。</p>
+        <div id="wizard-analyze-box">
+          <button class="btn primary" id="wizard-analyze-btn" onclick="analyzeInWizard()">🧠 开始拆解原著</button>
+        </div>
+        <div style="margin-top:16px">
+          <button class="btn" onclick="prevStep()">← 上一步</button>
+          <button class="btn" onclick="nextStep()">下一步：角色设定 →</button>
         </div>
       </div>
 
       <!-- 步骤 3：角色设定 -->
-      <div id="step-3" class="step-panel" style="display:none">
+      <div id="step-2" class="step-panel" style="display:none">
         <h3>角色设定</h3>
-        <p class="hint">在「角色库」中统一管理角色：上传照片、AI 自动分析外貌与性格。点击卡片进入详情编辑；添加的角色会自动归入本小说。</p>
-        <button class="btn primary" onclick="goAddCharacterFromWizard()">＋ 添加角色</button>
+        <div id="analyzed-chars-box"></div>
+        <p class="hint">在「角色库」中统一管理角色：上传照片、AI 自动分析外貌与性格。可从角色库选择已有角色（一个角色可同时属于多部小说），也可新建角色。</p>
+        <div class="row" style="gap:10px">
+          <button class="btn" onclick="goAddCharacterFromWizard()">＋ 新建角色</button>
+          <button class="btn primary" onclick="toggleCharacterPicker()">从角色库选择</button>
+        </div>
+
+        <!-- 角色选择面板（从角色库勾选已有角色） -->
+        <div id="character-picker" class="card" style="display:none; margin-top:12px">
+          <div class="row">
+            <span class="title">从角色库选择角色</span>
+            <span class="spacer"></span>
+            <button class="btn" onclick="toggleCharacterPicker()">关闭</button>
+          </div>
+          <p class="hint">勾选角色加入本小说（一个角色可属于多部小说），取消勾选即从本小说移除。</p>
+          <div id="character-picker-list" class="character-picker-list"></div>
+        </div>
+
         <div id="character-list" class="char-grid" style="margin-top:16px"></div>
 
         <h4 style="margin-top:20px">人物关系设定</h4>
@@ -477,8 +526,29 @@
         <button class="btn" onclick="addRelation()">＋ 添加关系</button>
 
         <div style="margin-top:20px">
-          <button class="btn" onclick="goStep(2)">← 上一步</button>
-          <button class="btn primary" onclick="saveNovelChars()">完成，进入生成 →</button>
+          <button class="btn" onclick="prevStep()">← 上一步</button>
+          <button class="btn primary" onclick="saveNovelCharsOnly()">保存角色设定</button>
+          <button class="btn" onclick="nextStep()">下一步：模型与提示词 →</button>
+        </div>
+      </div>
+
+      <!-- 步骤 3：模型与提示词 -->
+      <div id="step-3" class="step-panel" style="display:none">
+        <h3>创作模型与前置提示词</h3>
+        <div class="form-grid">
+          <label>创作模型
+            <select id="n-model"></select>
+          </label>
+        </div>
+        <div class="card global-prompt-card">
+          <span class="title">全局前置提示词</span>
+          <p class="hint">对所有 AI 生成（大纲、章节正文、风格分析、人物照片分析）统一生效的创作指令，例如：全文使用古文对话、避免现代词汇、整体基调偏喜剧等。留空则不加。</p>
+          <textarea id="global-prompt" rows="8" placeholder=""></textarea>
+        </div>
+        <div style="margin-top:16px">
+          <button class="btn" onclick="prevStep()">← 上一步</button>
+          <button class="btn primary" onclick="saveNovelModelAndPrompt()">保存模型与提示词</button>
+          <button class="btn primary" onclick="saveNovelModelAndPrompt(true)">保存并进入生成 →</button>
         </div>
       </div>
     </section>
@@ -576,7 +646,7 @@
           <span class="meta" id="continue-chapter-hint">接下来写第 1 章</span>
         </div>
         <p class="hint">以导入的原文为前情，告诉 AI 这一章要续写什么情节，AI 会承接原文结尾继续创作。</p>
-        <textarea id="continue-instruction" rows="3" placeholder="例如：主角在多年后重返故地，发现当年的真相另有隐情……"></textarea>
+        <textarea id="continue-instruction" rows="6" placeholder="例如：主角在多年后重返故地，发现当年的真相另有隐情……"></textarea>
         <div class="row" style="margin-top:10px">
           <button class="btn primary" id="continue-gen-btn" onclick="generateContinueChapter()">续写下一章</button>
           <span class="spacer"></span>
@@ -610,6 +680,11 @@
       </div>
     </section>
   </main>
+
+  <footer class="app-footer">
+    <span>织叙-NexTale</span>
+    <span class="footer-version" id="app-version"></span>
+  </footer>
 
   <div id="toast" class="toast"></div>
 
@@ -648,6 +723,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260826k"></script>
+  <script src="app.js?v=20260828d"></script>
 </body>
 </html>
