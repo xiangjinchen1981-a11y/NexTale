@@ -232,6 +232,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   width: 72px; height: 72px;
   border-radius: 8px;
   object-fit: cover;
+  object-position: top;
   border: 1px solid var(--border);
   background: var(--accent-soft);
 }
@@ -248,6 +249,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 .char-card-cover img {
   width: 100%; height: 100%;
   object-fit: cover;
+  object-position: top;
   display: block;
 }
 .char-cover-ph {
@@ -307,7 +309,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   overflow: hidden;
   cursor: pointer;
 }
-.char-grid-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.char-grid-cover img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
 .char-grid-body { padding: 10px 12px 12px; }
 .char-grid-body .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .char-grid-name { font-weight: 600; font-size: 15px; cursor: pointer; }
@@ -330,7 +332,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   overflow: hidden;
   background: var(--accent-soft);
 }
-.char-detail-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.char-detail-photo img { width: 100%; height: 100%; object-fit: cover; object-position: top; display: block; }
 .char-detail-form { display: flex; flex-direction: column; gap: 4px; }
 @media (max-width: 760px) {
   .char-detail-layout { grid-template-columns: 1fr; }
@@ -754,6 +756,41 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   border-left: 3px solid var(--accent);
   border-radius: 4px;
 }
+.improv-chapter-summary {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+/* 章节卡片内的「引用本章」选择行 */
+.improv-ref-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+.improv-ref-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.improv-ref-item input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+.improv-ref-row select {
+  padding: 3px 6px;
+  font-size: 13px;
+}
+.improv-ref-row select:disabled { opacity: 0.5; }
 
 /* 引用前文章节选择区 */
 .improv-context-list {
@@ -1236,6 +1273,40 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   word-break: break-word;
 }
 
+/* 小说向导：关联世界书选择 */
+.form-field { margin: 12px 0; }
+.field-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.worldbook-select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.worldbook-select-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: border-color 0.15s;
+}
+.worldbook-select-item:hover { border-color: var(--accent); }
+.worldbook-select-item input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+.worldbook-select-name { color: var(--text); }
+.worldbook-select-item .meta { font-size: 12px; }
+
 /* ============ 角色库筛选 ============ */
 .character-filter-row {
   margin: 12px 0 8px;
@@ -1291,6 +1362,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   height: 40px;
   border-radius: 6px;
   object-fit: cover;
+  object-position: top;
 }
 .character-picker-name {
   font-size: 14px;
@@ -1367,6 +1439,90 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   border-top: 1px solid var(--border);
 }
 
+/* ============ 正文角色名高亮 + 角色卡弹窗 ============ */
+.char-mention {
+  color: var(--accent);
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 1px dashed var(--accent);
+  padding: 0 1px;
+  transition: background 0.15s;
+}
+.char-mention:hover {
+  background: var(--accent-soft);
+  border-bottom-style: solid;
+}
+.char-card-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 400;
+}
+.char-card-modal {
+  background: var(--card);
+  border-radius: 14px;
+  width: min(520px, 94vw);
+  max-height: 86vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+.char-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.char-card-title { font-weight: 600; font-size: 15px; }
+.char-card-body {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  overflow-y: auto;
+}
+.char-card-photo {
+  flex: none;
+  width: 120px;
+  height: 160px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.char-card-photo img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  object-position: top;
+  display: block;
+}
+.char-card-info { flex: 1; min-width: 0; }
+.char-card-field { margin-bottom: 12px; }
+.char-card-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.char-card-text {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.char-card-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
 /* ============ 添加角色页照片选择与预览 ============ */
 .photo-picker-row { display: flex; gap: 8px; margin-top: 6px; }
 .photo-preview {
@@ -1383,6 +1539,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   width: 72px;
   height: 96px;
   object-fit: cover;
+  object-position: top;
   border-radius: 6px;
   border: 1px solid var(--border);
 }

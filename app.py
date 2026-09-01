@@ -206,11 +206,15 @@ def _ctx(novel: dict | None = None, user_id: str = ""):
     settings = storage.get_settings(user_id)
     if novel and novel.get("text_model_id"):
         settings = {**settings, "text_model_id": novel["text_model_id"]}
+    # 世界书：仅注入该小说选择的世界书（未选择任何世界书时为空）
+    all_worldbooks = storage.list_worldbooks(user_id)
+    selected_ids = set((novel or {}).get("worldbook_ids") or [])
+    worldbooks = [wb for wb in all_worldbooks if wb.get("id") in selected_ids] if selected_ids else []
     return {
         "providers": storage.list_providers(user_id),
         "settings": settings,
         "characters": storage.list_characters(user_id),
-        "worldbooks": storage.list_worldbooks(user_id),
+        "worldbooks": worldbooks,
         "_user_id": user_id,
     }
 
@@ -757,15 +761,20 @@ def update_character(request: Request, cid: str, body: dict):
 @app.delete("/api/characters/{cid}")
 def delete_character(request: Request, cid: str):
     uid = request.state.user_id
-    chars = [c for c in storage.list_characters(uid) if c.get("id") != cid]
-    storage.save_characters(chars, uid)
-    # 同步清理所有小说中对该角色的引用（避免残留失效 id）
-    for n in storage.list_novels(uid):
+    # 检查角色是否被任何未删除的小说关联，若关联则不允许删除
+    linked_novels = []
+    for n in storage.list_novels(uid):  # 默认只返回未删除（deleted_at=0）的小说
         ids = n.get("character_ids") or []
         if cid in ids:
-            def mut(m):
-                m["character_ids"] = [x for x in (m.get("character_ids") or []) if x != cid]
-            storage.update_novel(n["id"], uid, mut)
+            linked_novels.append(n.get("title") or "未命名")
+    if linked_novels:
+        titles = "、".join(linked_novels)
+        raise HTTPException(
+            409,
+            f"该角色已被小说《{titles}》关联，无法删除。请先在小说中移除该角色，或删除对应小说后再试。",
+        )
+    chars = [c for c in storage.list_characters(uid) if c.get("id") != cid]
+    storage.save_characters(chars, uid)
     return {"characters": chars}
 
 
@@ -863,6 +872,7 @@ def create_novel(request: Request, body: dict):
         "task_instruction": task_instruction,
         "structured_profile": body.get("structured_profile", ""),
         "dialog_messages": [],
+        "worldbook_ids": body.get("worldbook_ids", []),
         "created_at": time.time(),
     }
     # 改写模式：导入原文后立即切分为章节（每章内容 = 原文片段）
@@ -917,7 +927,8 @@ def update_novel(request: Request, nid: str, body: dict):
     editable = {"title", "genre", "style", "reference_text", "character_ids",
                 "relationships", "chapter_count", "words_per_chapter",
                 "text_model_id", "summary", "worldbuilding", "background", "mode",
-                "source_text", "task_instruction", "structured_profile"}
+                "source_text", "task_instruction", "structured_profile",
+                "worldbook_ids"}
     def mut(n):
         for k in editable:
             if k in body:
@@ -1108,7 +1119,6 @@ def delete_one_chapter(request: Request, nid: str, index: int):
 
 
 def _renumber_progress(progress_summary, deleted_index, remain_count):
-    uid = request.state.user_id
     """删除章节后重写前情提要的章节编号。
 
     - 删除被删章节的摘要条目
@@ -1511,16 +1521,16 @@ async def dialog_stream(request: Request, nid: str, body: dict):
     user_text = (body or {}).get("text", "").strip()
     if not user_text:
         raise HTTPException(400, "请先输入内容")
-    # 本轮期望字数：作者可指定，缺省 500
+    # 本轮期望字数：作者可在发言中指定（如「写300字」），或通过 word_limit 显式传入。
+    # 均未指定时由 generators 默认 500 字。
     word_limit = (body or {}).get("word_limit")
-    try:
-        word_limit = int(word_limit) if word_limit not in (None, "") else 500
-    except (TypeError, ValueError):
-        word_limit = 500
-    if word_limit < 50:
-        word_limit = 50
-    if word_limit > 5000:
-        word_limit = 5000
+    if word_limit not in (None, ""):
+        try:
+            word_limit = max(50, min(int(word_limit), 100000))
+        except (TypeError, ValueError):
+            word_limit = None
+    else:
+        word_limit = None
     ctx = _ctx(n, uid)
     history = (body or {}).get("history")
     if history is None:
@@ -1612,6 +1622,47 @@ def update_dialog_message(request: Request, nid: str, body: dict):
         ms = m.get("dialog_messages", []) or []
         if index < len(ms):
             ms[index]["content"] = content.strip()
+        m["dialog_messages"] = ms
+
+    storage.update_novel(nid, uid, mut)
+    return {"novel": storage.get_novel(nid, uid)}
+
+
+@app.post("/api/novels/{nid}/dialog/delete")
+def delete_dialog_message(request: Request, nid: str, body: dict):
+    """删除对话消息。body: {index} 删除单条；或 {indexes: [..]} 批量删除。"""
+    uid = request.state.user_id
+    n = storage.get_novel(nid, uid)
+    if not n:
+        raise HTTPException(404, "小说不存在")
+    _ensure_not_finished(n)
+    # 支持批量删除：indexes 数组优先
+    indexes = (body or {}).get("indexes")
+    if indexes is not None:
+        if not isinstance(indexes, list):
+            raise HTTPException(400, "indexes 应为数组")
+        try:
+            indexes = sorted({int(i) for i in indexes})
+        except (TypeError, ValueError):
+            raise HTTPException(400, "消息索引无效")
+    else:
+        index = (body or {}).get("index")
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            raise HTTPException(400, "缺少有效的消息索引")
+        indexes = [index]
+
+    msgs = n.get("dialog_messages", []) or []
+    if any(i < 0 or i >= len(msgs) for i in indexes):
+        raise HTTPException(400, "消息索引越界")
+
+    def mut(m):
+        ms = m.get("dialog_messages", []) or []
+        # 从大到小删除，避免索引偏移
+        for i in sorted(indexes, reverse=True):
+            if i < len(ms):
+                ms.pop(i)
         m["dialog_messages"] = ms
 
     storage.update_novel(nid, uid, mut)
@@ -2004,7 +2055,6 @@ def export_novel(request: Request, nid: str, format: str = "md"):
 
 
 def _export_md(n, title, ts):
-    uid = request.state.user_id
     lines = [f"# {title}", ""]
     if n.get("summary"):
         lines += ["## 故事梗概", n["summary"], ""]
@@ -2025,7 +2075,6 @@ def _export_md(n, title, ts):
 
 
 def _strip_markdown(text):
-    uid = request.state.user_id
     """去掉 Markdown 标记，保留纯文本。"""
     import re as _re
     # 标题
@@ -2041,7 +2090,6 @@ def _strip_markdown(text):
 
 
 def _export_txt(n, title, ts):
-    uid = request.state.user_id
     lines = [title, "=" * len(title), ""]
     if n.get("summary"):
         lines += ["【故事梗概】", n["summary"], ""]
@@ -2063,7 +2111,6 @@ def _export_txt(n, title, ts):
 
 
 def _escape_xml(s):
-    uid = request.state.user_id
     """转义 XML 特殊字符。"""
     s = s.replace("&", "&amp;")
     s = s.replace("<", "&lt;")
@@ -2074,7 +2121,6 @@ def _escape_xml(s):
 
 
 def _export_epub(n, title, ts):
-    uid = request.state.user_id
     """构造 EPUB 2.0 格式的 ZIP 文件（纯 Python，无外部依赖）。"""
     import zipfile
     import io
@@ -2135,7 +2181,6 @@ p { text-indent: 2em; margin: 0.5em 0; }
 
 
 def _build_intro_xhtml(n, title):
-    uid = request.state.user_id
     parts = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">',
@@ -2160,7 +2205,6 @@ def _build_intro_xhtml(n, title):
 
 
 def _build_chapter_xhtml(ch):
-    uid = request.state.user_id
     title = ch.get("title", "").strip() or f"第{ch['index']}章"
     parts = [
         '<?xml version="1.0" encoding="UTF-8"?>',
@@ -2181,7 +2225,6 @@ def _build_chapter_xhtml(ch):
 
 
 def _build_opf(n, title, chapter_files):
-    uid = request.state.user_id
     uid = f"urn:noveltale:{n.get('id', 'unknown')}"
     items = [
         f'    <item id="intro" href="intro.xhtml" media-type="application/xhtml+xml"/>',
@@ -2216,7 +2259,6 @@ def _build_opf(n, title, chapter_files):
 
 
 def _build_ncx(n, title, chapter_files):
-    uid = request.state.user_id
     uid = f"urn:noveltale:{n.get('id', 'unknown')}"
     nav_points = [
         f'''    <navPoint id="intro" playOrder="1">

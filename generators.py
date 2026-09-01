@@ -685,8 +685,29 @@ def _format_dialog_history(messages, max_turns=20):
     return "\n".join(lines)
 
 
-def _dialog_prompt(context, novel, user_text, history, word_limit=500):
-    """构造对话模式的 prompt：每次输出约 word_limit 字，以剧情片段推进。"""
+def _extract_dialog_word_limit(user_text, word_limit=None):
+    """提取对话模式本轮的字数要求。
+
+    - word_limit 显式传入时直接使用；
+    - 否则从作者发言中提取（支持「写300字」「20000字」「2万字」）；
+    - 均无则默认 500。返回钳制到 [50, 100000] 的结果。
+    """
+    if word_limit is None:
+        m = re.search(r"(\d+)\s*万字", user_text)
+        if m:
+            word_limit = int(m.group(1)) * 10000
+        else:
+            m = re.search(r"(\d+)\s*字", user_text)
+            word_limit = int(m.group(1)) if m else 500
+    return max(50, min(int(word_limit), 100000))
+
+
+def _dialog_prompt(context, novel, user_text, history, word_limit=None):
+    """构造对话模式的 prompt：每次输出约 word_limit 字，以剧情片段推进。
+
+    word_limit 缺省时，从作者本轮发言中提取字数要求（如「写300字」「300字左右」），
+    提取不到则默认 500 字。返回 (prompt, 最终字数)。
+    """
     chars = _format_characters(context, novel)
     rels = _format_relationships(context, novel)
     style = novel.get("style") or "文笔流畅自然，情节紧凑，人物鲜明。"
@@ -694,6 +715,8 @@ def _dialog_prompt(context, novel, user_text, history, word_limit=500):
     background = novel.get("background") or "（暂无背景设定）"
     prev = _clean_progress(novel.get("progress_summary")) or "（暂无前情）"
     history_text = _format_dialog_history(history)
+
+    word_limit = _extract_dialog_word_limit(user_text, word_limit)
 
     prompt = get_prompt(context, "dialog").format(
         title=novel.get("title") or "未命名",
@@ -714,15 +737,18 @@ def _dialog_prompt(context, novel, user_text, history, word_limit=500):
     wb_text = _format_worldbooks(context, only_constant=False, context_text=wb_context)
     if wb_text:
         prompt += "\n\n【世界书设定】\n" + wb_text
-    return prompt
+    return prompt, word_limit
 
 
-def dialog_stream(context, novel, user_text, history, word_limit=500):
+def dialog_stream(context, novel, user_text, history, word_limit=None):
     """对话模式：流式生成一段约 word_limit 字的剧情片段。"""
     provider, model, mcfg = _resolve(context, "text")
-    prompt = _dialog_prompt(context, novel, user_text, history, word_limit)
-    # 中文 1 字 ≈ 1.5 token，按字数换算并留足余量（至少 256）
-    max_tokens = mcfg.get("max_tokens") or max(256, int(word_limit * 1.5 * 1.4))
+    prompt, effective_limit = _dialog_prompt(context, novel, user_text, history, word_limit)
+    # 中文 1 字 ≈ 1.5 token，按最终字数换算 max_tokens 并留足余量（至少 256）
+    # 若模型显式配置了 max_tokens 且足够大，则取两者较大值，避免被模型配置卡住
+    by_words = max(256, int(effective_limit * 1.5 * 1.4))
+    configured = int(mcfg.get("max_tokens") or 0)
+    max_tokens = max(by_words, configured) if configured else by_words
     for delta in chat_text_stream(
             provider, model, _messages(context, prompt),
             temperature=_temperature(context, mcfg),

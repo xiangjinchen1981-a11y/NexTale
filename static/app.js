@@ -1051,6 +1051,64 @@ function charCoverHTML(c) {
   </div>`;
 }
 
+// ============ 正文角色名高亮 + 角色卡弹窗 ============
+// 获取当前小说关联的角色（含 id 与 name 映射）
+function novelCharacters() {
+  if (!state.novel) return [];
+  const ids = state.novel.character_ids || [];
+  return (state.characters || []).filter(c => ids.includes(c.id) && c.name);
+}
+
+// 将正文中的角色名高亮为可点击元素（点击打开角色卡）
+function highlightCharacterNames(content) {
+  const chars = novelCharacters();
+  if (!chars.length) return esc(content);
+  // 先转义，再按角色名长度从长到短替换，避免短名覆盖长名
+  let html = esc(content);
+  const sorted = chars.slice().sort((a, b) => (b.name || '').length - (a.name || '').length);
+  for (const c of sorted) {
+    const name = c.name.trim();
+    if (!name) continue;
+    // 转义角色名后作为正则字面量
+    const escName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(escName, 'g');
+    html = html.replace(re, `<span class="char-mention" data-cid="${esc(c.id)}" onclick="openCharCard('${esc(c.id)}')">${name}</span>`);
+  }
+  return html;
+}
+
+// 打开角色卡弹窗
+function openCharCard(id) {
+  const c = (state.characters || []).find(x => x.id === id);
+  if (!c) return;
+  const overlay = $('char-card-overlay');
+  if (!overlay) return;
+  $('char-card-title').textContent = c.name || '未命名';
+  $('char-card-photo').innerHTML = charCoverHTML(c);
+  $('char-card-appearance').textContent = c.appearance || '暂无';
+  $('char-card-personality').textContent = c.personality || '暂无';
+  $('char-card-background').textContent = c.background || '暂无';
+  $('char-card-notes').textContent = c.notes || '暂无';
+  // 记录当前角色 id，供「编辑角色」使用
+  overlay.dataset.cid = id;
+  overlay.style.display = 'flex';
+}
+
+// 关闭角色卡弹窗
+function closeCharCard() {
+  const overlay = $('char-card-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+// 从角色卡跳转到角色详情编辑页
+function editCharFromCard() {
+  const overlay = $('char-card-overlay');
+  const id = overlay ? overlay.dataset.cid : null;
+  if (!id) return;
+  closeCharCard();
+  nav('#/characters/' + id);
+}
+
 // 角色库列表页：照片卡片网格（state.characters 已是按需加载后的结果）
 function renderCharacterGrid() {
   const box = $('character-grid');
@@ -1984,6 +2042,7 @@ function newNovel() {
   renderNovelModelSelect();
   renderSettings();
   renderGenreSelect();
+  renderNovelWorldbookSelect();
   state.wizardStep = 1;
   $('editor-title').textContent = '新建小说';
   renderSteps();
@@ -2086,7 +2145,7 @@ function renderSteps() {
 
 async function saveNovelBasics() {
   const title = $('n-title').value.trim();
-  if (!title) return toast('请填写小说标题', 'err');
+  if (!title) { toast('请填写小说标题', 'err'); return false; }
   const body = {
     title,
     genre: $('n-genre').value.trim(),
@@ -2100,6 +2159,7 @@ async function saveNovelBasics() {
     source_text: $('n-source').value.trim(),
     task_instruction: $('n-task-instruction').value.trim(),
     structured_profile: state.novelProfile ? JSON.stringify(state.novelProfile) : '',
+    worldbook_ids: (state.novel && state.novel.worldbook_ids) || [],
   };
   try {
     if (state.novel) {
@@ -2115,7 +2175,14 @@ async function saveNovelBasics() {
       history.replaceState(null, '', '#/novels/' + state.novel.id + '/edit');
     }
     loadNovels();
-  } catch (e) { toast(e.message, 'err'); }
+    return true;
+  } catch (e) { toast(e.message, 'err'); return false; }
+}
+
+// 保存基本信息并进入下一步（供步骤1的「下一步」按钮使用）
+async function saveNovelBasicsAndNext() {
+  const ok = await saveNovelBasics();
+  if (ok) nextStep();
 }
 
 // 只保存角色设定（不跳转），供步骤2的「保存角色设定」按钮使用
@@ -2188,6 +2255,7 @@ async function openEditorPage(id) {
     renderNovelModelSelect();
     renderSettings();
     renderGenreSelect();
+    renderNovelWorldbookSelect();
     $('n-mode').value = state.novel.mode || 'outline';
     onModeChange();
     state.relations = (state.novel.relationships || []).map(r => ({ ...r }));
@@ -2259,6 +2327,7 @@ async function openChapterPage(id, index) {
 
 // ============ 即兴交互式写作 ============
 let improvGenerating = false;  // 是否正在生成中（防止重复提交）
+let improvSortDesc = true;     // 章节排序：默认倒序（最新在前）
 
 async function openImprovPage(id) {
   try {
@@ -2289,32 +2358,20 @@ function renderImprov() {
   const readBtn = $('improv-read-btn');
   if (readBtn) readBtn.style.display = done.length ? '' : 'none';
 
-  // 渲染"引用前文章节"选择区（有已生成章节时显示）
-  const ctxBox = $('improv-context-chapters');
-  if (ctxBox) {
-    if (done.length) {
-      ctxBox.style.display = 'block';
-      ctxBox.innerHTML = `<div class="improv-context-title">引用前文章节（选择要带入上下文的章节及方式）</div>` +
-        done.map(c => `
-          <label class="improv-context-item">
-            <input type="checkbox" id="improv-ref-${c.index}" checked>
-            <span>第${c.index}章 ${esc(c.title || '')}</span>
-            <select id="improv-ref-mode-${c.index}">
-              <option value="summary">摘要</option>
-              <option value="full">完整内容</option>
-            </select>
-          </label>`).join('');
-    } else {
-      ctxBox.style.display = 'none';
-    }
-  }
-
   if (!done.length) {
     body.innerHTML = '<div class="card meta">还没有章节。在上方输入本章写作指引，点击「生成本章」开始创作。</div>';
     return;
   }
 
-  body.innerHTML = done.map(c => `
+  // 排序：默认倒序（最新在前），可切换正序
+  const ordered = improvSortDesc ? done.slice().reverse() : done;
+  // 最近 4 章（index 最大的 4 章）默认「完整内容」，其余默认「摘要」
+  const maxIndex = Math.max(...done.map(c => c.index));
+  const recentSet = new Set(done.filter(c => c.index > maxIndex - 4).map(c => c.index));
+
+  body.innerHTML = ordered.map(c => {
+    const defaultMode = recentSet.has(c.index) ? 'full' : 'summary';
+    return `
     <div class="card improv-chapter-card">
       <div class="row">
         <span class="title">第${c.index}章</span>
@@ -2324,8 +2381,36 @@ function renderImprov() {
         <button class="btn" onclick="nav('#/novels/${n.id}/chapter/${c.index}')">查看/编辑正文</button>
       </div>
       ${c.instruction ? `<div class="improv-instruction-hint">📝 本章写作提示：${esc(c.instruction)}</div>` : ''}
-      <div class="chapter-content" style="max-height:300px">${esc(c.content)}</div>
-    </div>`).join('');
+      ${c.summary ? `<div class="improv-chapter-summary">${esc(c.summary)}</div>` : ''}
+      <div class="improv-ref-row">
+        <label class="improv-ref-item">
+          <input type="checkbox" id="improv-ref-${c.index}" checked onchange="onImprovRefToggle(${c.index})">
+          <span>引用本章</span>
+        </label>
+        <select id="improv-ref-mode-${c.index}">
+          <option value="summary" ${defaultMode === 'summary' ? 'selected' : ''}>带入摘要</option>
+          <option value="full" ${defaultMode === 'full' ? 'selected' : ''}>带入完整内容</option>
+        </select>
+      </div>
+    </div>`;
+  }).join('');
+
+  // 更新排序按钮文案
+  const sortBtn = $('improv-sort-btn');
+  if (sortBtn) sortBtn.textContent = improvSortDesc ? '排序：最新在前' : '排序：最早在前';
+}
+
+// 切换章节排序（正序/倒序）
+function toggleImprovSort() {
+  improvSortDesc = !improvSortDesc;
+  renderImprov();
+}
+
+// 切换引用勾选时，联动启用/禁用方式下拉
+function onImprovRefToggle(index) {
+  const cb = $('improv-ref-' + index);
+  const modeSel = $('improv-ref-mode-' + index);
+  if (cb && modeSel) modeSel.disabled = !cb.checked;
 }
 
 // 保存即兴章节标题
@@ -2499,11 +2584,12 @@ function renderDialog() {
   }
   chat.innerHTML = msgs.map((m, idx) => {
     const isUser = m.role === 'user';
-    // 每条消息的操作按钮：编辑 + （AI 消息）生成章节
+    // 每条消息的操作按钮：编辑 + （AI 消息）生成章节 + 删除（删除该消息及之后所有消息）
     const actions = `
       <div class="dialog-msg-actions">
         <button class="dialog-act-btn" onclick="editDialogMessage(${idx})">编辑</button>
         ${!isUser ? `<button class="dialog-act-btn" onclick="dialogToChapter(${idx})">生成章节</button>` : ''}
+        <button class="dialog-act-btn danger" onclick="deleteDialogMessage(${idx})">删除</button>
       </div>`;
     return `
       <div class="dialog-msg ${isUser ? 'dialog-msg-user' : 'dialog-msg-ai'}" data-idx="${idx}">
@@ -2551,6 +2637,27 @@ function editDialogMessage(idx) {
 function autoResizeTextarea(ta) {
   ta.style.height = 'auto';
   ta.style.height = (ta.scrollHeight + 2) + 'px';
+}
+
+// 删除某条对话消息及其之后的所有消息（点击删除时自动选中该消息及之后的消息）
+async function deleteDialogMessage(idx) {
+  if (dialogSending) return;
+  const msgs = (state.novel && state.novel.dialog_messages) || [];
+  if (idx < 0 || idx >= msgs.length) return;
+  const count = msgs.length - idx;  // 从 idx 到末尾的消息数
+  if (!confirm(`删除这条消息及其之后的 ${count} 条消息？`)) return;
+  // 自动选择 idx 及之后的所有消息索引
+  const indexes = [];
+  for (let i = idx; i < msgs.length; i++) indexes.push(i);
+  try {
+    const d = await api(`/api/novels/${state.novel.id}/dialog/delete`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ indexes }),
+    });
+    state.novel = d.novel;
+    renderDialog();
+    toast(`已删除 ${count} 条消息`, 'ok');
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 // 保存编辑：
@@ -2616,10 +2723,7 @@ async function saveDialogEdit(idx) {
 
   let full = '';
   try {
-    const wlEl = $('dialog-word-limit');
-    const wordLimit = wlEl && wlEl.value.trim() !== '' ? parseInt(wlEl.value, 10) : null;
     const body = { text: newText, history: prefix };
-    if (wordLimit !== null && !isNaN(wordLimit)) body.word_limit = wordLimit;
     await streamApi(`/api/novels/${state.novel.id}/dialog/stream`, (ev) => {
       if (ev.type === 'delta') {
         full += ev.content;
@@ -2716,12 +2820,7 @@ async function sendDialogMessage() {
   const input = $('dialog-input');
   const text = input.value.trim();
   if (!text) return toast('请先输入内容', 'err');
-  // 读取本轮期望字数（留空则后端默认 500）
-  const wlEl = $('dialog-word-limit');
-  const wordLimit = wlEl && wlEl.value.trim() !== '' ? parseInt(wlEl.value, 10) : null;
-  if (wordLimit !== null && (isNaN(wordLimit) || wordLimit < 50 || wordLimit > 5000)) {
-    return toast('字数需在 50~5000 之间', 'err');
-  }
+  // 字数由作者在指令中指定（如「写300字」），后端会自动提取，未指定则默认 500 字
 
   dialogSending = true;
   const btn = $('dialog-send-btn');
@@ -2752,7 +2851,6 @@ async function sendDialogMessage() {
   let full = '';
   try {
     const body = { text };
-    if (wordLimit !== null) body.word_limit = wordLimit;
     await streamApi(`/api/novels/${state.novel.id}/dialog/stream`, (ev) => {
       if (ev.type === 'delta') {
         full += ev.content;
@@ -2836,7 +2934,7 @@ function renderReader() {
   html += done.map(c => `
     <div class="reader-chapter" id="reader-ch-${c.index}">
       <h2 class="reader-ch-title">第${c.index}章 ${esc(c.title || '')}</h2>
-      <div class="reader-ch-content">${esc(c.content)}</div>
+      <div class="reader-ch-content">${highlightCharacterNames(c.content)}</div>
     </div>`).join('');
 
   body.innerHTML = html;
@@ -2998,7 +3096,7 @@ function renderChapterPage(index) {
         </label>
       </div>`;
   } else if (chapter.content) {
-    html += `<div class="chapter-content full-chapter-content">${esc(chapter.content)}</div>`;
+    html += `<div class="chapter-content full-chapter-content">${highlightCharacterNames(chapter.content)}</div>`;
   } else {
     html += `<div class="card meta">本章尚未生成，点击上方「生成本章」开始。</div>`;
   }
@@ -3813,6 +3911,7 @@ function applyGenreTemplate() {
   if (!gid) return;
   const g = (state.genres || []).find(x => x.id === gid);
   if (!g) return;
+  // 题材库只填充「风格」「参考文本」，不影响独立的「题材类型」「故事背景」字段
   if (g.style && $('n-style')) $('n-style').value = g.style;
   if (g.reference_text && $('n-reference')) $('n-reference').value = g.reference_text;
   toast('已套用题材「' + g.name + '」的风格与参考文本', 'ok');
@@ -3922,6 +4021,45 @@ async function loadWorldbooks() {
     worldbooksState.list = d.worldbooks || [];
   } catch (e) { toast(e.message, 'err'); }
   renderWorldbooks();
+}
+
+// 渲染小说向导步骤1的「关联世界书」多选框
+async function renderNovelWorldbookSelect() {
+  const box = $('n-worldbooks');
+  if (!box) return;
+  // 确保世界书列表已加载
+  if (!worldbooksState.list.length) {
+    try {
+      const d = await api('/api/worldbooks');
+      worldbooksState.list = d.worldbooks || [];
+    } catch (e) { /* 忽略 */ }
+  }
+  const list = worldbooksState.list;
+  const selected = (state.novel && state.novel.worldbook_ids) || [];
+  if (!list.length) {
+    box.innerHTML = '<span class="meta">暂无世界书，可先到「世界书」页创建或导入。</span>';
+    return;
+  }
+  box.innerHTML = list.map(wb => {
+    const checked = selected.includes(wb.id);
+    return `
+    <label class="worldbook-select-item">
+      <input type="checkbox" value="${esc(wb.id)}" ${checked ? 'checked' : ''} onchange="toggleNovelWorldbook('${esc(wb.id)}', this.checked)">
+      <span class="worldbook-select-name">${esc(wb.name)}</span>
+      <span class="meta">${(wb.entries || []).length} 条目</span>
+    </label>`;
+  }).join('');
+}
+
+// 勾选/取消勾选世界书（仅更新本地 state，随「保存基本信息」一起提交）
+function toggleNovelWorldbook(wid, checked) {
+  let ids = (state.novel && state.novel.worldbook_ids) ? state.novel.worldbook_ids.slice() : [];
+  if (checked) {
+    if (!ids.includes(wid)) ids.push(wid);
+  } else {
+    ids = ids.filter(x => x !== wid);
+  }
+  if (state.novel) state.novel.worldbook_ids = ids;
 }
 
 function renderWorldbooks() {

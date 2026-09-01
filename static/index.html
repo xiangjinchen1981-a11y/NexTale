@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>织叙-NexTale</title>
-  <link rel="stylesheet" href="style.css?v=20260828a">
+  <link rel="stylesheet" href="style.css?v=20260901a">
 </head>
 <body>
   <header class="topbar">
@@ -479,9 +479,13 @@
         <label>参考小说文本（粘贴一段想模仿的小说，生成大纲时自动分析其风格）
           <textarea id="n-reference" rows="5" placeholder="粘贴参考小说片段…（可选）"></textarea>
         </label>
+        <div class="form-field">
+          <span class="field-label">关联世界书（可选，勾选后在生成时注入对应世界设定）</span>
+          <div id="n-worldbooks" class="worldbook-select"></div>
+        </div>
         <div style="margin-top:16px">
           <button class="btn primary" onclick="saveNovelBasics()">保存基本信息</button>
-          <button class="btn" onclick="nextStep()">下一步 →</button>
+          <button class="btn" onclick="saveNovelBasicsAndNext()">下一步 →</button>
         </div>
       </div>
 
@@ -577,12 +581,16 @@
         </div>
         <p class="hint">告诉 AI 这一章想写什么（情节方向、冲突、转折等），AI 会结合人物设定与前情即时创作，无需提前生成大纲。</p>
         <textarea id="improv-instruction" rows="3" placeholder="例如：主角在集市上偶遇仇家，被迫卷入一场冲突，最终险胜却暴露了身份。"></textarea>
-        <div id="improv-context-chapters" class="improv-context-list" style="display:none"></div>
         <div class="row" style="margin-top:12px">
           <button class="btn primary" id="improv-gen-btn" onclick="generateImprovChapter()">生成本章</button>
           <span class="spacer"></span>
           <button class="btn" onclick="nav('#/novels/' + currentNovelId + '/read')" id="improv-read-btn" style="display:none">阅读全文</button>
         </div>
+      </div>
+      <div class="row" style="margin:14px 0 8px">
+        <span class="title">已生成章节</span>
+        <span class="spacer"></span>
+        <button class="btn" id="improv-sort-btn" onclick="toggleImprovSort()">排序：最新在前</button>
       </div>
       <div id="improv-body"></div>
     </section>
@@ -597,8 +605,7 @@
       <div class="dialog-layout">
         <div class="dialog-chat" id="dialog-chat"></div>
         <div class="dialog-input-bar">
-          <textarea id="dialog-input" rows="2" placeholder="像聊天一样说一句剧情走向，例如：主角推开门，发现来的人竟然是失踪多年的兄长……"></textarea>
-          <input type="number" id="dialog-word-limit" min="50" max="5000" placeholder="500" title="AI 每次回复的字数（留空默认 500 字）" />
+          <textarea id="dialog-input" rows="2" placeholder="像聊天一样说一句剧情走向，例如：主角推开门，发现来的人竟然是失踪多年的兄长……（可在指令中指定字数，如「写300字」）"></textarea>
           <button class="btn primary" id="dialog-send-btn" onclick="sendDialogMessage()">发送</button>
         </div>
       </div>
@@ -723,6 +730,28 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260828d"></script>
+  <!-- 角色卡弹窗 -->
+  <div id="char-card-overlay" class="char-card-overlay" onclick="if(event.target===this)closeCharCard()">
+    <div class="char-card-modal">
+      <div class="char-card-head">
+        <span class="char-card-title" id="char-card-title">角色卡</span>
+        <button type="button" class="btn" onclick="closeCharCard()">✕</button>
+      </div>
+      <div class="char-card-body">
+        <div class="char-card-photo" id="char-card-photo"></div>
+        <div class="char-card-info">
+          <div class="char-card-field"><span class="char-card-label">外貌</span><div class="char-card-text" id="char-card-appearance"></div></div>
+          <div class="char-card-field"><span class="char-card-label">性格</span><div class="char-card-text" id="char-card-personality"></div></div>
+          <div class="char-card-field"><span class="char-card-label">背景</span><div class="char-card-text" id="char-card-background"></div></div>
+          <div class="char-card-field"><span class="char-card-label">补充</span><div class="char-card-text" id="char-card-notes"></div></div>
+        </div>
+      </div>
+      <div class="char-card-foot">
+        <button class="btn" onclick="editCharFromCard()">编辑角色</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js?v=20260831d"></script>
 </body>
 </html>
