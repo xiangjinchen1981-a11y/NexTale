@@ -517,6 +517,9 @@ def _format_worldbooks(context, only_constant=True, context_text=""):
 
 
 def _format_characters(context, novel):
+    # 背景设定跟随小说：优先用小说级 character_backgrounds，
+    # 为空时回退角色卡自身的 background（兼容旧数据）
+    char_bgs = novel.get("character_backgrounds") or {}
     chars = []
     for c in context["characters"]:
         if c.get("id") in novel.get("character_ids", []):
@@ -525,8 +528,9 @@ def _format_characters(context, novel):
                 parts.append(f"  外貌：{c['appearance']}")
             if c.get("personality"):
                 parts.append(f"  性格：{c['personality']}")
-            if c.get("background"):
-                parts.append(f"  背景：{c['background']}")
+            bg = (char_bgs.get(c.get("id")) or "").strip() or (c.get("background") or "").strip()
+            if bg:
+                parts.append(f"  背景：{bg}")
             if c.get("notes"):
                 parts.append(f"  补充：{c['notes']}")
             chars.append("\n".join(parts))

@@ -928,7 +928,7 @@ def update_novel(request: Request, nid: str, body: dict):
                 "relationships", "chapter_count", "words_per_chapter",
                 "text_model_id", "summary", "worldbuilding", "background", "mode",
                 "source_text", "task_instruction", "structured_profile",
-                "worldbook_ids"}
+                "worldbook_ids", "character_backgrounds"}
     def mut(n):
         for k in editable:
             if k in body:

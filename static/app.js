@@ -1008,6 +1008,7 @@ let charBackHash = '#/characters'; // 详情/添加页「返回」目标
 let charAssignNovelId = null;    // 从小说向导进入添加页时，新角色自动归入的小说 id
 let resumeWizardStep = null;     // 从角色页返回小说编辑页时恢复的向导步骤
 let newCharPhotoBlob = null;     // 添加页已裁剪、待上传的照片
+let charBgNovelId = null;        // 从小说创作入口进入角色卡时，绑定的小说 id（用于展示并保存「本书背景设定」）
 
 // 角色库小说筛选下拉数据（与角色列表分开，按需加载）
 let characterNovelList = [];
@@ -1087,7 +1088,9 @@ function openCharCard(id) {
   $('char-card-photo').innerHTML = charCoverHTML(c);
   $('char-card-appearance').textContent = c.appearance || '暂无';
   $('char-card-personality').textContent = c.personality || '暂无';
-  $('char-card-background').textContent = c.background || '暂无';
+  // 背景设定跟随小说：优先显示本书背景，无则回退角色库背景（兼容旧数据）
+  const bookBg = (state.novel && state.novel.character_backgrounds && state.novel.character_backgrounds[id]) || '';
+  $('char-card-background').textContent = bookBg || c.background || '（背景设定跟随各小说，请从小说创作进入角色卡填写本书背景）';
   $('char-card-notes').textContent = c.notes || '暂无';
   // 记录当前角色 id，供「编辑角色」使用
   overlay.dataset.cid = id;
@@ -1106,6 +1109,16 @@ function editCharFromCard() {
   const id = overlay ? overlay.dataset.cid : null;
   if (!id) return;
   closeCharCard();
+  if (state.novel) {
+    // 从小说阅读/生成页进入：视为小说创作入口，展示并保存「本书背景设定」
+    charBackHash = '#/novels/' + state.novel.id + '/edit';
+    resumeWizardStep = 2;
+    charBgNovelId = state.novel.id;
+  } else {
+    charBackHash = '#/characters';
+    resumeWizardStep = null;
+    charBgNovelId = null;
+  }
   nav('#/characters/' + id);
 }
 
@@ -1195,6 +1208,7 @@ function renderCharacters() {
 function openCharFromList(id) {
   charBackHash = '#/characters';
   resumeWizardStep = null;
+  charBgNovelId = null;          // 角色库入口：不展示「本书背景设定」
   nav('#/characters/' + id);
 }
 
@@ -1202,6 +1216,7 @@ function openCharFromList(id) {
 async function openCharFromWizard(id) {
   charBackHash = state.novel ? ('#/novels/' + state.novel.id + '/edit') : '#/characters';
   resumeWizardStep = 2;
+  charBgNovelId = state.novel ? state.novel.id : null;  // 小说入口：展示并保存「本书背景设定」
   await persistNovelCharsSilently();
   nav('#/characters/' + id);
 }
@@ -1217,6 +1232,7 @@ function goAddCharacterFromList() {
   const sel = $('character-novel-filter');
   charAssignNovelId = sel && sel.value ? sel.value : null;
   resumeWizardStep = null;
+  charBgNovelId = null;
   nav('#/characters/new');
 }
 
@@ -1226,6 +1242,7 @@ async function goAddCharacterFromWizard() {
   charBackHash = '#/novels/' + state.novel.id + '/edit';
   charAssignNovelId = state.novel.id;
   resumeWizardStep = 2;
+  charBgNovelId = state.novel.id;  // 新建后进入详情页同样展示「本书背景设定」
   await persistNovelCharsSilently();
   nav('#/characters/new');
 }
@@ -1303,7 +1320,6 @@ function resetCharacterNewForm() {
   $('c-new-name').value = '';
   $('c-new-appearance').value = '';
   $('c-new-personality').value = '';
-  $('c-new-background').value = '';
   $('c-new-notes').value = '';
   newCharPhotoBlob = null;
   renderNewPhotoPreview();
@@ -1322,7 +1338,6 @@ async function saveNewCharacter() {
         name,
         appearance: $('c-new-appearance').value.trim(),
         personality: $('c-new-personality').value.trim(),
-        background: $('c-new-background').value.trim(),
         notes: $('c-new-notes').value.trim(),
       }),
     });
@@ -1371,8 +1386,21 @@ async function openCharacterDetail(id) {
   $('c-detail-name').value = c.name || '';
   $('c-detail-appearance').value = c.appearance || '';
   $('c-detail-personality').value = c.personality || '';
-  $('c-detail-background').value = c.background || '';
   $('c-detail-notes').value = c.notes || '';
+  // 背景设定跟随小说：仅从小说创作入口进入时展示「本书背景设定」输入框
+  const bgWrap = $('c-detail-bg-wrap');
+  if (bgWrap) bgWrap.style.display = charBgNovelId ? '' : 'none';
+  const bgEl = $('c-detail-background');
+  if (bgEl) {
+    bgEl.value = '';
+    if (charBgNovelId) {
+      try {
+        const nd = await api('/api/novels/' + charBgNovelId);
+        bgEl.value = (nd.novel.character_backgrounds || {})[id] || '';
+        if (state.novel && state.novel.id === charBgNovelId) state.novel = nd.novel;
+      } catch (e) { bgEl.value = ''; }
+    }
+  }
   if (!charBackHash) charBackHash = '#/characters';
 }
 
@@ -1389,10 +1417,22 @@ async function saveCharacterDetail() {
         name,
         appearance: $('c-detail-appearance').value.trim(),
         personality: $('c-detail-personality').value.trim(),
-        background: $('c-detail-background').value.trim(),
         notes: $('c-detail-notes').value.trim(),
       }),
     });
+    // 若从小说创作入口进入，同时把「本书背景设定」保存到该小说的 character_backgrounds
+    if (charBgNovelId) {
+      const bgEl = $('c-detail-background');
+      const bg = bgEl ? bgEl.value.trim() : '';
+      const nd = await api('/api/novels/' + charBgNovelId);
+      const bgs = Object.assign({}, nd.novel.character_backgrounds || {});
+      if (bg) bgs[id] = bg; else delete bgs[id];
+      const upd = await api('/api/novels/' + charBgNovelId, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ character_backgrounds: bgs }),
+      });
+      if (state.novel && state.novel.id === charBgNovelId) state.novel = upd.novel;
+    }
     await loadAllCharacters();
     const title = $('character-detail-title');
     if (title) title.textContent = '角色详情 · ' + name;

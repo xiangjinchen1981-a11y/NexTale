@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>织叙-NexTale</title>
-  <link rel="stylesheet" href="style.css?v=20260901a">
+  <link rel="stylesheet" href="style.css?v=20260902b">
 </head>
 <body>
   <header class="topbar">
@@ -284,9 +284,7 @@
         <label>性格
           <textarea id="c-new-personality" rows="4" placeholder="如：外冷内热，心思缜密，重情重义"></textarea>
         </label>
-        <label>背景设定
-          <textarea id="c-new-background" rows="4" placeholder="如：前朝遗孤，隐姓埋名，背负家族血仇"></textarea>
-        </label>
+        <p class="hint">外貌与性格为角色固有属性（各小说通用）；背景设定跟随小说，从小说创作进入角色卡即可填写「本书背景设定」。</p>
         <label>补充
           <textarea id="c-new-notes" rows="3" placeholder="其他补充信息（可选）"></textarea>
         </label>
@@ -319,9 +317,10 @@
           <label>性格
             <textarea id="c-detail-personality" rows="4"></textarea>
           </label>
-          <label>背景设定
-            <textarea id="c-detail-background" rows="4"></textarea>
+          <label id="c-detail-bg-wrap" style="display:none">本书背景设定
+            <textarea id="c-detail-background" rows="4" placeholder="该角色在本小说中的背景设定（同一角色在不同小说中可不同）"></textarea>
           </label>
+          <p class="hint">外貌与性格为角色固有属性（各小说通用）；背景设定跟随小说——从小说创作进入角色卡时，可在此填写「本书背景设定」。</p>
           <label>补充
             <textarea id="c-detail-notes" rows="3"></textarea>
           </label>
@@ -506,7 +505,7 @@
       <div id="step-2" class="step-panel" style="display:none">
         <h3>角色设定</h3>
         <div id="analyzed-chars-box"></div>
-        <p class="hint">在「角色库」中统一管理角色：上传照片、AI 自动分析外貌与性格。可从角色库选择已有角色（一个角色可同时属于多部小说），也可新建角色。</p>
+        <p class="hint">在「角色库」中统一管理角色：上传照片、AI 自动分析外貌与性格。可从角色库选择已有角色（一个角色可同时属于多部小说），也可新建角色。外貌与性格为角色固有属性；点击角色卡进入详情可填写「本书背景设定」（仅对当前小说生效，同一角色在不同小说中可有不同背景）。</p>
         <div class="row" style="gap:10px">
           <button class="btn" onclick="goAddCharacterFromWizard()">＋ 新建角色</button>
           <button class="btn primary" onclick="toggleCharacterPicker()">从角色库选择</button>
@@ -742,7 +741,7 @@
         <div class="char-card-info">
           <div class="char-card-field"><span class="char-card-label">外貌</span><div class="char-card-text" id="char-card-appearance"></div></div>
           <div class="char-card-field"><span class="char-card-label">性格</span><div class="char-card-text" id="char-card-personality"></div></div>
-          <div class="char-card-field"><span class="char-card-label">背景</span><div class="char-card-text" id="char-card-background"></div></div>
+          <div class="char-card-field"><span class="char-card-label">本书背景</span><div class="char-card-text" id="char-card-background"></div></div>
           <div class="char-card-field"><span class="char-card-label">补充</span><div class="char-card-text" id="char-card-notes"></div></div>
         </div>
       </div>
@@ -752,6 +751,6 @@
     </div>
   </div>
 
-  <script src="app.js?v=20260831d"></script>
+  <script src="app.js?v=20260902b"></script>
 </body>
 </html>
