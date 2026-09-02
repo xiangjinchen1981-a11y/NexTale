@@ -14,7 +14,7 @@ from typing import Optional
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -241,7 +241,7 @@ class ConnectIn(BaseModel):
 
 class ModelIn(BaseModel):
     name: str = ""
-    type: str = "text"  # "text" 或 "vision"，二选一
+    type: str = "text"  # "text" / "vision" / "image"
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     context_length: Optional[int] = None  # 模型上下文窗口长度（token），用于截断超长输入
@@ -326,7 +326,7 @@ def delete_provider(request: Request, pid: str):
         model_ids = {m.get("id") for m in target.get("models", [])}
         s = storage.get_settings(uid)
         changed = False
-        for key in ("text_model_id", "vision_model_id"):
+        for key in ("text_model_id", "vision_model_id", "image_model_id"):
             if s.get(key) in model_ids:
                 s[key] = ""
                 changed = True
@@ -352,8 +352,8 @@ def add_model(request: Request, pid: str, m: ModelIn):
     uid = request.state.user_id
     if not m.name.strip():
         raise HTTPException(400, "模型名不能为空")
-    if m.type not in ("text", "vision"):
-        raise HTTPException(400, "模型类型必须为 text 或 vision")
+    if m.type not in ("text", "vision", "image"):
+        raise HTTPException(400, "模型类型必须为 text、vision 或 image")
     providers = storage.list_providers(uid)
     for p in providers:
         if p.get("id") == pid:
@@ -368,8 +368,8 @@ def update_model(request: Request, pid: str, mid: str, m: ModelIn):
     uid = request.state.user_id
     if not m.name.strip():
         raise HTTPException(400, "模型名不能为空")
-    if m.type not in ("text", "vision"):
-        raise HTTPException(400, "模型类型必须为 text 或 vision")
+    if m.type not in ("text", "vision", "image"):
+        raise HTTPException(400, "模型类型必须为 text、vision 或 image")
     providers = storage.list_providers(uid)
     for p in providers:
         if p.get("id") == pid:
@@ -393,7 +393,7 @@ def delete_model(request: Request, pid: str, mid: str):
             storage.save_providers(providers, uid)
             s = storage.get_settings(uid)
             changed = False
-            for key in ("text_model_id", "vision_model_id"):
+            for key in ("text_model_id", "vision_model_id", "image_model_id"):
                 if s.get(key) == mid:
                     s[key] = ""
                     changed = True
@@ -413,7 +413,8 @@ def test_model(request: Request, pid: str, mid: str):
     if not model:
         raise HTTPException(404, "模型不存在")
     vision = model.get("type") == "vision"
-    ok, msg = test_connection(provider, model.get("name", ""), vision=vision)
+    image = model.get("type") == "image"
+    ok, msg = test_connection(provider, model.get("name", ""), vision=vision, image=image)
     return {"ok": ok, "message": msg}
 
 
@@ -427,7 +428,7 @@ def get_settings(request: Request):
 @app.post("/api/settings")
 def save_settings(request: Request, body: dict):
     uid = request.state.user_id
-    allowed = {"text_model_id", "vision_model_id",
+    allowed = {"text_model_id", "vision_model_id", "image_model_id",
                "token_ratio", "temperature", "global_prompt", "prompts"}
     cur = storage.get_settings(uid)
     for k in allowed:
@@ -821,6 +822,26 @@ async def analyze_character_photo(request: Request, file: UploadFile = File(...)
     except AIClientError as e:
         raise HTTPException(400, f"AI 分析失败：{e}")
     return {"appearance": analysis["appearance"], "personality": analysis["personality"]}
+
+
+@app.post("/api/generate-character-photo")
+def generate_character_photo(request: Request, body: dict):
+    """AI 文生图：按提示词生成角色照片，直接返回图片字节流，由前端预览确认后随角色保存。"""
+    uid = request.state.user_id
+    prompt = (body.get("prompt") or "").strip()
+    if not prompt:
+        raise HTTPException(400, "生图提示词不能为空")
+    ctx = _ctx(user_id=uid)
+    if not ctx["settings"].get("image_model_id"):
+        raise HTTPException(400, "未配置图片生成模型，请先在「配置」页添加图片模型并点「设为当前」")
+    try:
+        data = generators.generate_character_photo(ctx, prompt)
+    except AIClientError as e:
+        raise HTTPException(400, f"图片生成失败：{e}")
+    if not data:
+        raise HTTPException(400, "图片生成失败：服务商返回空图片")
+    media = "image/png" if data[:8].startswith(b"\x89PNG") else "image/jpeg"
+    return Response(content=data, media_type=media)
 
 
 # ================= 小说 =================

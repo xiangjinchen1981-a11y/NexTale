@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>织叙-NexTale</title>
+  <title data-i18n="织叙">织叙-NexTale</title>
   <link rel="stylesheet" href="style.css?v=20260902c">
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">📖 织叙-NexTale</div>
+    <div class="brand">📖 <span data-i18n="织叙">织叙</span></div>
     <nav class="tabs" id="main-tabs">
       <button class="tab" data-tab="genres" data-i18n="题材库">题材库</button>
       <button class="tab" data-tab="worldbooks" data-i18n="世界书">世界书</button>
@@ -19,12 +19,13 @@
     </nav>
     <span class="spacer"></span>
     <select id="lang-select" class="lang-select" onchange="setLocale(this.value)" title="Language / 语言">
-      <option value="zh">中文</option>
+      <option value="zh">简体中文</option>
+      <option value="zh-TW">繁體中文</option>
       <option value="en">English</option>
     </select>
     <button class="btn" id="btn-providers" onclick="nav('#/providers')" data-i18n="配置">配置</button>
     <button class="btn" id="btn-users" onclick="nav('#/users')" style="display:none" data-i18n="用户管理">用户管理</button>
-    <button class="btn theme-toggle" id="btn-theme" onclick="toggleTheme()" title="切换夜间模式">🌙</button>
+    <button class="btn theme-toggle" id="btn-theme" onclick="toggleTheme()" title="切换夜间模式" data-i18n-title="切换夜间模式">🌙</button>
     <div class="user-dropdown" id="user-dropdown" style="display:none">
       <button class="user-badge" id="user-badge" onclick="toggleUserDropdown()"></button>
       <div class="user-dropdown-menu" id="user-dropdown-menu">
@@ -84,7 +85,7 @@
 
       <!-- 大模型API 配置 -->
       <div id="config-tab-api">
-        <p class="hint">先添加服务商并「连接」拉取模型列表，再在服务商下「添加模型」——每个模型选类型（文本/视觉二选一）并配置参数，最后点「●」标记设为当前使用。</p>
+        <p class="hint" data-i18n="先添加服务商并「连接」拉取模型列表，再在服务商下「添加模型」——每个模型选类型（文本/视觉二选一）并配置参数，最后点「●」标记设为当前使用。">先添加服务商并「连接」拉取模型列表，再在服务商下「添加模型」——每个模型选类型（文本/视觉二选一）并配置参数，最后点「●」标记设为当前使用。</p>
         <div id="provider-list" class="card-list"></div>
 
         <h3 id="provider-form-title" data-i18n="添加服务商">添加服务商</h3>
@@ -95,7 +96,7 @@
             </select>
           </label>
           <label><span data-i18n="名称">名称</span>
-            <input id="p-name" placeholder="如 DeepSeek">
+            <input id="p-name" placeholder="如 DeepSeek" data-i18n-placeholder="如 DeepSeek">
           </label>
           <label>Base URL
             <input id="p-base" placeholder="https://api.deepseek.com/v1">
@@ -131,7 +132,7 @@
 
       <!-- 提示词配置 -->
       <div id="config-tab-prompt" style="display:none">
-        <p class="hint">自定义各类 AI 生成使用的提示词模板。模板中使用 <code>{变量}</code> 占位符，生成时会自动替换。留空并保存即恢复默认。</p>
+        <p class="hint"><span data-i18n="自定义各类 AI 生成使用的提示词模板。模板中使用">自定义各类 AI 生成使用的提示词模板。模板中使用</span> <code>{变量}</code> <span data-i18n="占位符，生成时会自动替换。留空并保存即恢复默认。">占位符，生成时会自动替换。留空并保存即恢复默认。</span></p>
         <div id="prompt-config-list" class="card-list"></div>
       </div>
     </section>
@@ -153,17 +154,17 @@
         </div>
         <div class="form-grid">
           <label><span data-i18n="题材名称">题材名称</span>
-            <input id="g-name" placeholder="如 玄幻 / 都市言情 / 悬疑">
+            <input id="g-name" placeholder="如 玄幻 / 都市言情 / 悬疑" data-i18n-placeholder="如 玄幻 / 都市言情 / 悬疑">
           </label>
         </div>
         <label><span data-i18n="参考风格">参考风格</span>
-          <textarea id="g-style" rows="3" placeholder="如：冷峻克制、多短句、白描；或具体风格要求"></textarea>
+          <textarea id="g-style" rows="3" placeholder="如：冷峻克制、多短句、白描；或具体风格要求" data-i18n-placeholder="如：冷峻克制、多短句、白描；或具体风格要求"></textarea>
         </label>
         <label><span data-i18n="参考文本片段（可选，创作时作为参考原文）">参考文本片段（可选，创作时作为参考原文）</span>
-          <textarea id="g-reference" rows="4" placeholder="粘贴该题材的参考小说片段…"></textarea>
+          <textarea id="g-reference" rows="4" placeholder="粘贴该题材的参考小说片段…" data-i18n-placeholder="粘贴该题材的参考小说片段…"></textarea>
         </label>
         <label><span data-i18n="题材描述（可选）">题材描述（可选）</span>
-          <textarea id="g-description" rows="2" placeholder="简要说明该题材的特点"></textarea>
+          <textarea id="g-description" rows="2" placeholder="简要说明该题材的特点" data-i18n-placeholder="简要说明该题材的特点"></textarea>
         </label>
         <div style="margin-top:12px">
           <button class="btn primary" onclick="saveGenre()" data-i18n="保存">保存</button>
@@ -177,8 +178,8 @@
           <span class="title" data-i18n="导入题材库">导入题材库</span>
           <span class="spacer"></span>
         </div>
-        <p class="hint">粘贴 JSON 数组导入，格式：<code>[{"name":"题材名","style":"参考风格","reference_text":"参考文本","description":"描述"}, ...]</code></p>
-        <textarea id="g-import-text" rows="8" placeholder='[{"name":"玄幻","style":"热血爽文","reference_text":"","description":"东方玄幻题材"}]'></textarea>
+        <p class="hint"><span data-i18n="粘贴 JSON 数组导入，格式：">粘贴 JSON 数组导入，格式：</span><code data-i18n='[{"name":"题材名","style":"参考风格","reference_text":"参考文本","description":"描述"}, ...]'>[{"name":"题材名","style":"参考风格","reference_text":"参考文本","description":"描述"}, ...]</code></p>
+        <textarea id="g-import-text" rows="8" placeholder='[{"name":"玄幻","style":"热血爽文","reference_text":"","description":"东方玄幻题材"}]' data-i18n-placeholder='[{"name":"玄幻","style":"热血爽文","reference_text":"","description":"东方玄幻题材"}]'></textarea>
         <div style="margin-top:12px">
           <button class="btn primary" onclick="importGenres()" data-i18n="导入">导入</button>
           <button class="btn" onclick="hideGenreImport()" data-i18n="取消">取消</button>
@@ -205,13 +206,13 @@
         </div>
         <div class="form-grid">
           <label><span data-i18n="世界书名称">世界书名称</span>
-            <input id="wb-name" placeholder="如 九州世界 / 修仙世界观">
+            <input id="wb-name" placeholder="如 九州世界 / 修仙世界观" data-i18n-placeholder="如 九州世界 / 修仙世界观">
           </label>
         </div>
         <label><span data-i18n="描述（可选）">描述（可选）</span>
-          <textarea id="wb-description" rows="2" placeholder="简要说明该世界书的内容"></textarea>
+          <textarea id="wb-description" rows="2" placeholder="简要说明该世界书的内容" data-i18n-placeholder="简要说明该世界书的内容"></textarea>
         </label>
-        <p class="hint">条目可通过「导入」批量添加，也可在列表里逐条编辑。</p>
+        <p class="hint" data-i18n="条目可通过「导入」批量添加，也可在列表里逐条编辑。">条目可通过「导入」批量添加，也可在列表里逐条编辑。</p>
         <div style="margin-top:12px">
           <button class="btn primary" onclick="saveWorldbook()" data-i18n="保存">保存</button>
           <button class="btn" onclick="hideWorldbookForm()" data-i18n="取消">取消</button>
@@ -224,11 +225,11 @@
           <span class="title" data-i18n="导入世界书（SillyTavern 格式）">导入世界书（SillyTavern 格式）</span>
           <span class="spacer"></span>
         </div>
-        <p class="hint">支持 SillyTavern 世界书（World Info / Lorebook）JSON。可直接粘贴 JSON 文本，或选择文件上传。</p>
+        <p class="hint" data-i18n="支持 SillyTavern 世界书（World Info / Lorebook）JSON。可直接粘贴 JSON 文本，或选择文件上传。">支持 SillyTavern 世界书（World Info / Lorebook）JSON。可直接粘贴 JSON 文本，或选择文件上传。</p>
         <label><span data-i18n="世界书名称（可选，留空用文件内名称）">世界书名称（可选，留空用文件内名称）</span>
-          <input id="wb-import-name" placeholder="如 九州世界">
+          <input id="wb-import-name" placeholder="如 九州世界" data-i18n-placeholder="如 九州世界">
         </label>
-        <textarea id="wb-import-text" rows="10" placeholder='粘贴 JSON，例如：{"entries":{"1":{"key":["关键词"],"content":"条目内容","comment":"备注","constant":false,"enabled":true,"position":"before_char","depth":4}}}'></textarea>
+        <textarea id="wb-import-text" rows="10" placeholder='粘贴 JSON，例如：{"entries":{"1":{"key":["关键词"],"content":"条目内容","comment":"备注","constant":false,"enabled":true,"position":"before_char","depth":4}}}' data-i18n-placeholder='粘贴 JSON，例如：{"entries":{"1":{"key":["关键词"],"content":"条目内容","comment":"备注","constant":false,"enabled":true,"position":"before_char","depth":4}}}'></textarea>
         <div style="margin-top:10px">
           <input type="file" id="wb-import-file" accept=".json,application/json" onchange="onWorldbookFileSelected(this)">
         </div>
@@ -268,29 +269,30 @@
       <div class="card">
         <div class="form-grid">
           <label><span data-i18n="角色姓名">角色姓名</span>
-            <input id="c-new-name" placeholder="如 林晚晴">
+            <input id="c-new-name" placeholder="如 林晚晴" data-i18n-placeholder="如 林晚晴">
           </label>
           <label><span data-i18n="照片（可选）">照片（可选）</span>
             <input id="c-new-photo" type="file" accept="image/*" onchange="onNewPhotoPicked(this)" style="display:none">
             <div class="photo-picker-row">
               <button type="button" class="btn" onclick="rePickNewPhoto()">📷 <span data-i18n="选择照片并裁切">选择照片并裁切</span></button>
+              <button type="button" class="btn" onclick="genNewPhoto()">🎨 <span data-i18n="AI 生成照片">AI 生成照片</span></button>
               <button type="button" class="btn" onclick="analyzeNewPhoto()">✨ <span data-i18n="AI 分析">AI 分析</span></button>
             </div>
             <div id="c-new-photo-preview" class="photo-preview" style="display:none">
-              <img id="c-new-photo-img" alt="照片预览">
+              <img id="c-new-photo-img" alt="照片预览" data-i18n-alt="照片预览">
               <button type="button" class="btn" onclick="rePickNewPhoto()" data-i18n="重新选择">重新选择</button>
             </div>
           </label>
         </div>
         <label><span data-i18n="外貌">外貌</span>
-          <textarea id="c-new-appearance" rows="4" placeholder="如：一袭青衫，眉目如画，气质清冷"></textarea>
+          <textarea id="c-new-appearance" rows="4" placeholder="如：一袭青衫，眉目如画，气质清冷" data-i18n-placeholder="如：一袭青衫，眉目如画，气质清冷"></textarea>
         </label>
         <label><span data-i18n="性格">性格</span>
-          <textarea id="c-new-personality" rows="4" placeholder="如：外冷内热，心思缜密，重情重义"></textarea>
+          <textarea id="c-new-personality" rows="4" placeholder="如：外冷内热，心思缜密，重情重义" data-i18n-placeholder="如：外冷内热，心思缜密，重情重义"></textarea>
         </label>
-        <p class="hint">外貌与性格为角色固有属性（各小说通用）；背景设定跟随小说，从小说创作进入角色卡即可填写「本书背景设定」。</p>
+        <p class="hint" data-i18n="外貌与性格为角色固有属性（各小说通用）；背景设定跟随小说，从小说创作进入角色卡即可填写「本书背景设定」。">外貌与性格为角色固有属性（各小说通用）；背景设定跟随小说，从小说创作进入角色卡即可填写「本书背景设定」。</p>
         <label><span data-i18n="补充">补充</span>
-          <textarea id="c-new-notes" rows="3" placeholder="其他补充信息（可选）"></textarea>
+          <textarea id="c-new-notes" rows="3" placeholder="其他补充信息（可选）" data-i18n-placeholder="其他补充信息（可选）"></textarea>
         </label>
         <div style="margin-top:12px">
           <button class="btn primary" onclick="saveNewCharacter()" data-i18n="保存角色">保存角色</button>
@@ -322,9 +324,9 @@
             <textarea id="c-detail-personality" rows="4"></textarea>
           </label>
           <label id="c-detail-bg-wrap" style="display:none"><span data-i18n="本书背景设定">本书背景设定</span>
-            <textarea id="c-detail-background" rows="4" placeholder="该角色在本小说中的背景设定（同一角色在不同小说中可不同）"></textarea>
+            <textarea id="c-detail-background" rows="4" placeholder="该角色在本小说中的背景设定（同一角色在不同小说中可不同）" data-i18n-placeholder="该角色在本小说中的背景设定（同一角色在不同小说中可不同）"></textarea>
           </label>
-          <p class="hint">外貌与性格为角色固有属性（各小说通用）；背景设定跟随小说——从小说创作进入角色卡时，可在此填写「本书背景设定」。</p>
+          <p class="hint" data-i18n="外貌与性格为角色固有属性（各小说通用）；背景设定跟随小说——从小说创作进入角色卡时，可在此填写「本书背景设定」。">外貌与性格为角色固有属性（各小说通用）；背景设定跟随小说——从小说创作进入角色卡时，可在此填写「本书背景设定」。</p>
           <label><span data-i18n="补充">补充</span>
             <textarea id="c-detail-notes" rows="3"></textarea>
           </label>
@@ -394,7 +396,7 @@
         <span class="spacer"></span>
         <button class="btn" onclick="loadLibrary()" data-i18n="刷新">刷新</button>
       </div>
-      <p class="hint">这里只展示已完结的小说，点击「开始阅读」进入阅读模式。</p>
+      <p class="hint" data-i18n="这里只展示已完结的小说，点击「开始阅读」进入阅读模式。">这里只展示已完结的小说，点击「开始阅读」进入阅读模式。</p>
       <div id="library-list" class="card-list"></div>
     </section>
 
@@ -428,10 +430,10 @@
         <h3 data-i18n="基本信息">基本信息</h3>
         <div class="form-grid">
           <label><span data-i18n="小说标题">小说标题</span>
-            <input id="n-title" placeholder="如 长安雪落">
+            <input id="n-title" placeholder="如 长安雪落" data-i18n-placeholder="如 长安雪落">
           </label>
           <label><span data-i18n="题材类型（可下拉选择常用题材，也可直接输入自定义题材）">题材类型（可下拉选择常用题材，也可直接输入自定义题材）</span>
-            <input id="n-genre" placeholder="如 古言 / 悬疑 / 科幻 / 都市" list="genre-presets">
+            <input id="n-genre" placeholder="如 古言 / 悬疑 / 科幻 / 都市" list="genre-presets" data-i18n-placeholder="如 古言 / 悬疑 / 科幻 / 都市">
             <datalist id="genre-presets"></datalist>
           </label>
           <label><span data-i18n="从题材库选择（选中后自动填充题材/风格/参考文本）">从题材库选择（选中后自动填充题材/风格/参考文本）</span>
@@ -457,9 +459,9 @@
         </div>
         <div id="source-import-box" style="display:none">
           <h4 data-i18n="导入已有小说原文">导入已有小说原文</h4>
-          <p class="hint">粘贴已有小说的全文，作为「改写」的素材或「续写」的前情。导入后系统会自动按章节（或每章字数）切分。</p>
+          <p class="hint" data-i18n="粘贴已有小说的全文，作为「改写」的素材或「续写」的前情。导入后系统会自动按章节（或每章字数）切分。">粘贴已有小说的全文，作为「改写」的素材或「续写」的前情。导入后系统会自动按章节（或每章字数）切分。</p>
           <label><span data-i18n="原文内容">原文内容</span>
-            <textarea id="n-source" rows="10" placeholder="粘贴已有小说的全文…"></textarea>
+            <textarea id="n-source" rows="10" placeholder="粘贴已有小说的全文…" data-i18n-placeholder="粘贴已有小说的全文…"></textarea>
           </label>
           <div class="row" style="margin-top:6px">
             <button type="button" class="btn" onclick="pickSourceFile()">📄 <span data-i18n="从文件导入（.txt / .md）">从文件导入（.txt / .md）</span></button>
@@ -467,20 +469,20 @@
             <span class="meta" id="n-source-info"></span>
           </div>
           <label><span data-i18n="改写要求 / 续写要求">改写要求 / 续写要求</span>
-            <textarea id="n-task-instruction" rows="3" placeholder="改写示例：改写成第一人称、古文风、精简到原来的60%…；续写示例：让主角踏上复仇之路、开启全新篇章…"></textarea>
+            <textarea id="n-task-instruction" rows="3" placeholder="改写示例：改写成第一人称、古文风、精简到原来的60%…；续写示例：让主角踏上复仇之路、开启全新篇章…" data-i18n-placeholder="改写示例：改写成第一人称、古文风、精简到原来的60%…；续写示例：让主角踏上复仇之路、开启全新篇章…"></textarea>
           </label>
         </div>
         <label><span data-i18n="故事背景（时代/地点/大环境设定）">故事背景（时代/地点/大环境设定）</span>
-          <textarea id="n-background" rows="5" placeholder="如：架空的东方大陆，王朝末年，边关战乱频仍"></textarea>
+          <textarea id="n-background" rows="5" placeholder="如：架空的东方大陆，王朝末年，边关战乱频仍" data-i18n-placeholder="如：架空的东方大陆，王朝末年，边关战乱频仍"></textarea>
         </label>
         <label><span data-i18n="世界观（力量体系/规则/特殊设定）">世界观（力量体系/规则/特殊设定）</span>
-          <textarea id="n-worldbuilding" rows="5" placeholder="如：修仙体系分练气/筑基/金丹/元婴，灵气复苏"></textarea>
+          <textarea id="n-worldbuilding" rows="5" placeholder="如：修仙体系分练气/筑基/金丹/元婴，灵气复苏" data-i18n-placeholder="如：修仙体系分练气/筑基/金丹/元婴，灵气复苏"></textarea>
         </label>
         <label><span data-i18n="写作风格（留空则用默认流畅叙事）">写作风格（留空则用默认流畅叙事）</span>
-          <textarea id="n-style" rows="5" placeholder="如：冷峻克制、多短句、白描，参考鲁迅式笔法"></textarea>
+          <textarea id="n-style" rows="5" placeholder="如：冷峻克制、多短句、白描，参考鲁迅式笔法" data-i18n-placeholder="如：冷峻克制、多短句、白描，参考鲁迅式笔法"></textarea>
         </label>
         <label><span data-i18n="参考小说文本（粘贴一段想模仿的小说，生成大纲时自动分析其风格）">参考小说文本（粘贴一段想模仿的小说，生成大纲时自动分析其风格）</span>
-          <textarea id="n-reference" rows="5" placeholder="粘贴参考小说片段…（可选）"></textarea>
+          <textarea id="n-reference" rows="5" placeholder="粘贴参考小说片段…（可选）" data-i18n-placeholder="粘贴参考小说片段…（可选）"></textarea>
         </label>
         <div class="form-field">
           <span class="field-label" data-i18n="关联世界书（可选，勾选后在生成时注入对应世界设定）">关联世界书（可选，勾选后在生成时注入对应世界设定）</span>
@@ -495,7 +497,7 @@
       <!-- 步骤 2：AI 原著拆解（仅续写模式） -->
       <div id="step-analyze" class="step-panel" style="display:none">
         <h3 data-i18n="AI 原著拆解">AI 原著拆解</h3>
-        <p class="hint">AI 将通读全文，提取人物档案、世界观、主线框架与脉络摘要，拆解结果将在本页完整展示（主要角色同时展示在下一步的角色设定中）。拆解结果会自动保存，续写时严格遵循。</p>
+        <p class="hint" data-i18n="AI 将通读全文，提取人物档案、世界观、主线框架与脉络摘要，拆解结果将在本页完整展示（主要角色同时展示在下一步的角色设定中）。拆解结果会自动保存，续写时严格遵循。">AI 将通读全文，提取人物档案、世界观、主线框架与脉络摘要，拆解结果将在本页完整展示（主要角色同时展示在下一步的角色设定中）。拆解结果会自动保存，续写时严格遵循。</p>
         <div id="wizard-analyze-box">
           <button class="btn primary" id="wizard-analyze-btn" onclick="analyzeInWizard()">🧠 <span data-i18n="开始拆解原著">开始拆解原著</span></button>
         </div>
@@ -509,7 +511,7 @@
       <div id="step-2" class="step-panel" style="display:none">
         <h3 data-i18n="角色设定">角色设定</h3>
         <div id="analyzed-chars-box"></div>
-        <p class="hint">在「角色库」中统一管理角色：上传照片、AI 自动分析外貌与性格。可从角色库选择已有角色（一个角色可同时属于多部小说），也可新建角色。外貌与性格为角色固有属性；点击角色卡进入详情可填写「本书背景设定」（仅对当前小说生效，同一角色在不同小说中可有不同背景）。</p>
+        <p class="hint" data-i18n="在「角色库」中统一管理角色：上传照片、AI 自动分析外貌与性格。可从角色库选择已有角色（一个角色可同时属于多部小说），也可新建角色。外貌与性格为角色固有属性；点击角色卡进入详情可填写「本书背景设定」（仅对当前小说生效，同一角色在不同小说中可有不同背景）。">在「角色库」中统一管理角色：上传照片、AI 自动分析外貌与性格。可从角色库选择已有角色（一个角色可同时属于多部小说），也可新建角色。外貌与性格为角色固有属性；点击角色卡进入详情可填写「本书背景设定」（仅对当前小说生效，同一角色在不同小说中可有不同背景）。</p>
         <div class="row" style="gap:10px">
           <button class="btn" onclick="goAddCharacterFromWizard()">＋ <span data-i18n="新建角色">新建角色</span></button>
           <button class="btn primary" onclick="toggleCharacterPicker()" data-i18n="从角色库选择">从角色库选择</button>
@@ -522,7 +524,7 @@
             <span class="spacer"></span>
             <button class="btn" onclick="toggleCharacterPicker()" data-i18n="关闭">关闭</button>
           </div>
-          <p class="hint">勾选角色加入本小说（一个角色可属于多部小说），取消勾选即从本小说移除。</p>
+          <p class="hint" data-i18n="勾选角色加入本小说（一个角色可属于多部小说），取消勾选即从本小说移除。">勾选角色加入本小说（一个角色可属于多部小说），取消勾选即从本小说移除。</p>
           <div id="character-picker-list" class="character-picker-list"></div>
         </div>
 
@@ -549,7 +551,7 @@
         </div>
         <div class="card global-prompt-card">
           <span class="title" data-i18n="全局前置提示词">全局前置提示词</span>
-          <p class="hint">对所有 AI 生成（大纲、章节正文、风格分析、人物照片分析）统一生效的创作指令，例如：全文使用古文对话、避免现代词汇、整体基调偏喜剧等。留空则不加。</p>
+          <p class="hint" data-i18n="对所有 AI 生成（大纲、章节正文、风格分析、人物照片分析）统一生效的创作指令，例如：全文使用古文对话、避免现代词汇、整体基调偏喜剧等。留空则不加。">对所有 AI 生成（大纲、章节正文、风格分析、人物照片分析）统一生效的创作指令，例如：全文使用古文对话、避免现代词汇、整体基调偏喜剧等。留空则不加。</p>
           <textarea id="global-prompt" rows="8" placeholder=""></textarea>
         </div>
         <div style="margin-top:16px">
@@ -582,8 +584,8 @@
           <span class="title" data-i18n="本章写作指引">本章写作指引</span>
           <span class="meta" id="improv-chapter-hint">接下来写第 1 章</span>
         </div>
-        <p class="hint">告诉 AI 这一章想写什么（情节方向、冲突、转折等），AI 会结合人物设定与前情即时创作，无需提前生成大纲。</p>
-        <textarea id="improv-instruction" rows="3" placeholder="例如：主角在集市上偶遇仇家，被迫卷入一场冲突，最终险胜却暴露了身份。"></textarea>
+        <p class="hint" data-i18n="告诉 AI 这一章想写什么（情节方向、冲突、转折等），AI 会结合人物设定与前情即时创作，无需提前生成大纲。">告诉 AI 这一章想写什么（情节方向、冲突、转折等），AI 会结合人物设定与前情即时创作，无需提前生成大纲。</p>
+        <textarea id="improv-instruction" rows="3" placeholder="例如：主角在集市上偶遇仇家，被迫卷入一场冲突，最终险胜却暴露了身份。" data-i18n-placeholder="例如：主角在集市上偶遇仇家，被迫卷入一场冲突，最终险胜却暴露了身份。"></textarea>
         <div class="row" style="margin-top:12px">
           <button class="btn primary" id="improv-gen-btn" onclick="generateImprovChapter()" data-i18n="生成本章">生成本章</button>
           <span class="spacer"></span>
@@ -608,7 +610,7 @@
       <div class="dialog-layout">
         <div class="dialog-chat" id="dialog-chat"></div>
         <div class="dialog-input-bar">
-          <textarea id="dialog-input" rows="2" placeholder="像聊天一样说一句剧情走向，例如：主角推开门，发现来的人竟然是失踪多年的兄长……（可在指令中指定字数，如「写300字」）"></textarea>
+          <textarea id="dialog-input" rows="2" placeholder="像聊天一样说一句剧情走向，例如：主角推开门，发现来的人竟然是失踪多年的兄长……（可在指令中指定字数，如「写300字」）" data-i18n-placeholder="像聊天一样说一句剧情走向，例如：主角推开门，发现来的人竟然是失踪多年的兄长……（可在指令中指定字数，如「写300字」）"></textarea>
           <button class="btn primary" id="dialog-send-btn" onclick="sendDialogMessage()" data-i18n="发送">发送</button>
         </div>
       </div>
@@ -630,8 +632,8 @@
           <span class="title" data-i18n="改写要求">改写要求</span>
           <span class="meta" id="rewrite-chapter-hint"></span>
         </div>
-        <p class="hint">设定整体的改写目标（人称、文风、篇幅、背景等），对下方每个章节生效；也可在每章单独点「改写」时覆盖。</p>
-        <textarea id="rewrite-instruction" rows="2" placeholder="例如：改写成第一人称、古文风、精简到原来的60%…"></textarea>
+        <p class="hint" data-i18n="设定整体的改写目标（人称、文风、篇幅、背景等），对下方每个章节生效；也可在每章单独点「改写」时覆盖。">设定整体的改写目标（人称、文风、篇幅、背景等），对下方每个章节生效；也可在每章单独点「改写」时覆盖。</p>
+        <textarea id="rewrite-instruction" rows="2" placeholder="例如：改写成第一人称、古文风、精简到原来的60%…" data-i18n-placeholder="例如：改写成第一人称、古文风、精简到原来的60%…"></textarea>
         <div class="row" style="margin-top:10px">
           <button class="btn" id="rewrite-save-instr" onclick="saveRewriteInstruction()" data-i18n="保存要求">保存要求</button>
           <button class="btn primary" id="rewrite-all-btn" onclick="rewriteAll()" data-i18n="改写全部章节">改写全部章节</button>
@@ -655,8 +657,8 @@
           <span class="title" data-i18n="本章续写要求">本章续写要求</span>
           <span class="meta" id="continue-chapter-hint">接下来写第 1 章</span>
         </div>
-        <p class="hint">以导入的原文为前情，告诉 AI 这一章要续写什么情节，AI 会承接原文结尾继续创作。</p>
-        <textarea id="continue-instruction" rows="6" placeholder="例如：主角在多年后重返故地，发现当年的真相另有隐情……"></textarea>
+        <p class="hint" data-i18n="以导入的原文为前情，告诉 AI 这一章要续写什么情节，AI 会承接原文结尾继续创作。">以导入的原文为前情，告诉 AI 这一章要续写什么情节，AI 会承接原文结尾继续创作。</p>
+        <textarea id="continue-instruction" rows="6" placeholder="例如：主角在多年后重返故地，发现当年的真相另有隐情……" data-i18n-placeholder="例如：主角在多年后重返故地，发现当年的真相另有隐情……"></textarea>
         <div class="row" style="margin-top:10px">
           <button class="btn primary" id="continue-gen-btn" onclick="generateContinueChapter()" data-i18n="续写下一章">续写下一章</button>
           <span class="spacer"></span>
@@ -681,8 +683,8 @@
       <div class="reader-toolbar">
         <a class="back-link" id="reader-back-link" href="#/novels">← <span data-i18n="返回">返回</span></a>
         <span class="spacer"></span>
-        <button class="btn" onclick="changeReaderFont(-1)" title="减小字号">A−</button>
-        <button class="btn" onclick="changeReaderFont(1)" title="增大字号">A＋</button>
+        <button class="btn" onclick="changeReaderFont(-1)" title="减小字号" data-i18n-title="减小字号">A−</button>
+        <button class="btn" onclick="changeReaderFont(1)" title="增大字号" data-i18n-title="增大字号">A＋</button>
       </div>
       <div class="reader-layout">
         <aside id="reader-toc" class="reader-toc"></aside>
@@ -692,7 +694,7 @@
   </main>
 
   <footer class="app-footer">
-    <span>织叙-NexTale</span>
+    <span data-i18n="织叙">织叙</span>
     <span class="footer-version" id="app-version"></span>
   </footer>
 
@@ -733,6 +735,27 @@
     </div>
   </div>
 
+  <!-- AI 生成照片模态框 -->
+  <div id="genimg-overlay" class="crop-overlay">
+    <div class="crop-modal">
+      <div class="crop-modal-head">
+        <span data-i18n="AI 生成角色照片">AI 生成角色照片</span>
+        <button type="button" class="btn" onclick="closeGenImg()">✕</button>
+      </div>
+      <div class="genimg-body">
+        <label><span data-i18n="生图提示词">生图提示词</span>
+          <textarea id="genimg-prompt" rows="4" placeholder="如：年轻女子，青色长裙，黑色长发，柔和光线，人物肖像" data-i18n-placeholder="如：年轻女子，青色长裙，黑色长发，柔和光线，人物肖像"></textarea>
+        </label>
+      </div>
+      <div class="crop-modal-foot">
+        <span class="hint" data-i18n="可写角色外貌、穿着、气质与画面风格">可写角色外貌、穿着、气质与画面风格</span>
+        <span class="spacer"></span>
+        <button type="button" class="btn" onclick="closeGenImg()" data-i18n="取消">取消</button>
+        <button type="button" class="btn primary" onclick="runGenPhoto()" data-i18n="生成">生成</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 角色卡弹窗 -->
   <div id="char-card-overlay" class="char-card-overlay" onclick="if(event.target===this)closeCharCard()">
     <div class="char-card-modal">
@@ -755,7 +778,7 @@
     </div>
   </div>
 
-  <script src="i18n.js?v=20260902c"></script>
-  <script src="app.js?v=20260902c"></script>
+  <script src="i18n.js?v=20260902g"></script>
+  <script src="app.js?v=20260902g"></script>
 </body>
 </html>

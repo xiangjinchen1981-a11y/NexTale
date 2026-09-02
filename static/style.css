@@ -28,6 +28,7 @@
   --subtle-bg: #1f232b;
 }
 [data-theme="dark"] .badge-vision { background: #3a2230; color: #f472b6; }
+[data-theme="dark"] .badge-image { background: #1f2f3a; color: #38bdf8; }
 [data-theme="dark"] .gen-output.gen-error { color: #f87171; border-color: #f87171; }
 [data-theme="dark"] .toast { background: #2a2e38; }
 
@@ -200,6 +201,7 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 .model-item:last-child { border-bottom: none; }
 .model-form { background: var(--subtle-bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-top: 8px; }
 .badge-vision { background: #fdf2f8; color: #db2777; }
+.badge-image { background: #eff6ff; color: #0284c7; }
 .radio-group { display: flex; gap: 12px; padding: 6px 0; }
 .radio-inline { display: flex; align-items: center; gap: 4px; font-size: 14px; color: var(--text); cursor: pointer; }
 .radio-inline input { margin: 0; }
@@ -1412,6 +1414,9 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
   font-weight: 600;
   font-size: 14px;
 }
+.genimg-body { padding: 16px; }
+.genimg-body label { display: block; }
+.genimg-body textarea { width: 100%; margin-top: 6px; }
 .crop-stage {
   position: relative;
   height: 440px;

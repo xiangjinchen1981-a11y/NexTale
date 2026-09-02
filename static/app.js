@@ -25,6 +25,12 @@ let authToken = localStorage.getItem('novel_token') || '';
 // ============ 工具函数 ============
 const $ = (id) => document.getElementById(id);
 
+// 按当前界面语言格式化时间（unix 秒）
+function fmtDateTime(ts, opts = { hour12: false }) {
+  const loc = { en: 'en-US', 'zh-TW': 'zh-TW' }[getLocale()] || 'zh-CN';
+  return new Date(ts * 1000).toLocaleString(loc, opts);
+}
+
 // ============ 夜间模式 ============
 function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme);
@@ -58,7 +64,7 @@ async function api(path, opts = {}) {
   if (res.status === 401) {
     // 登录失效，跳转登录页
     handleUnauthorized();
-    throw new Error((data && data.detail) ? data.detail : '未登录或登录已过期');
+    throw new Error((data && data.detail) ? data.detail : t('未登录或登录已过期'));
   }
   if (!res.ok) {
     let detail = data && data.detail;
@@ -68,7 +74,7 @@ async function api(path, opts = {}) {
     } else if (detail && typeof detail === 'object') {
       detail = detail.message || JSON.stringify(detail);
     }
-    const msg = detail ? String(detail) : `请求失败(${res.status})`;
+    const msg = detail ? String(detail) : t('请求失败（{n}）', { n: res.status });
     throw new Error(msg);
   }
   return data;
@@ -87,7 +93,7 @@ function toast(msg, type = '') {
 }
 
 // 全屏加载遮罩：带进度条（可传入标题与副标题）
-function showLoading(title = '处理中…', sub = '') {
+function showLoading(title = t('处理中…'), sub = '') {
   const ov = $('loading-overlay');
   const el = $('loading-title');
   const s = $('loading-sub');
@@ -137,42 +143,42 @@ async function prepareLogin() {
 async function doLogin() {
   const username = ($('login-username') || {}).value || '';
   const password = ($('login-password') || {}).value || '';
-  if (!username || !password) { toast('请输入用户名和密码', 'err'); return; }
+  if (!username || !password) { toast(t('请输入用户名和密码'), 'err'); return; }
   try {
     const res = await fetch('/api/auth/login', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     });
     const d = await res.json();
-    if (!res.ok) { toast(d.detail || '登录失败', 'err'); return; }
+    if (!res.ok) { toast(d.detail || t('登录失败'), 'err'); return; }
     authToken = d.token;
     currentUser = d.user;
     localStorage.setItem('novel_token', authToken);
-    toast('登录成功', 'ok');
+    toast(t('登录成功'), 'ok');
     onLoginSuccess();
-  } catch (e) { toast('登录失败：' + e.message, 'err'); }
+  } catch (e) { toast(t('登录失败：') + e.message, 'err'); }
 }
 
 async function doRegister() {
   const username = ($('reg-username') || {}).value || '';
   const password = ($('reg-password') || {}).value || '';
   const password2 = ($('reg-password2') || {}).value || '';
-  if (!username || !password) { toast('请输入用户名和密码', 'err'); return; }
-  if (password !== password2) { toast('两次密码不一致', 'err'); return; }
-  if (password.length < 4) { toast('密码至少 4 个字符', 'err'); return; }
+  if (!username || !password) { toast(t('请输入用户名和密码'), 'err'); return; }
+  if (password !== password2) { toast(t('两次密码不一致'), 'err'); return; }
+  if (password.length < 4) { toast(t('密码至少 4 个字符'), 'err'); return; }
   try {
     const res = await fetch('/api/auth/register', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     });
     const d = await res.json();
-    if (!res.ok) { toast(d.detail || '注册失败', 'err'); return; }
+    if (!res.ok) { toast(d.detail || t('注册失败'), 'err'); return; }
     authToken = d.token;
     currentUser = d.user;
     localStorage.setItem('novel_token', authToken);
-    toast('管理员已创建', 'ok');
+    toast(t('管理员已创建'), 'ok');
     onLoginSuccess();
-  } catch (e) { toast('注册失败：' + e.message, 'err'); }
+  } catch (e) { toast(t('注册失败：') + e.message, 'err'); }
 }
 
 async function onLoginSuccess() {
@@ -252,20 +258,20 @@ function renderUsers(users) {
   const el = $('user-list');
   if (!el) return;
   if (!users || !users.length) {
-    el.innerHTML = '<p class="hint">暂无其他用户</p>';
+    el.innerHTML = `<p class="hint">${t('暂无其他用户')}</p>`;
     return;
   }
   el.innerHTML = `<table class="user-table"><thead><tr>
-    <th>用户名</th><th>角色</th><th>创建时间</th><th>操作</th>
+    <th>${t('用户名')}</th><th>${t('角色')}</th><th>${t('创建时间')}</th><th>${t('操作')}</th>
     </tr></thead><tbody>
     ${users.map(u => `<tr>
       <td>${esc(u.username)}</td>
-      <td>${u.role === 'admin' ? '管理员' : '普通用户'}</td>
-      <td>${u.created_at ? new Date(u.created_at * 1000).toLocaleString('zh-CN', {hour12: false}) : '-'}</td>
+      <td>${u.role === 'admin' ? t('管理员') : t('普通用户')}</td>
+      <td>${u.created_at ? fmtDateTime(u.created_at) : '-'}</td>
       <td>
-        <button class="btn btn-sm" onclick="changeUserPassword('${u.id}', '${esc(u.username)}')">改密码</button>
-        <button class="btn btn-sm" onclick="toggleUserRole('${u.id}', '${u.role}')">${u.role === 'admin' ? '降为普通' : '升为管理'}</button>
-        <button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}', '${esc(u.username)}')">删除</button>
+        <button class="btn btn-sm" onclick="changeUserPassword('${u.id}', '${esc(u.username)}')">${t('改密码')}</button>
+        <button class="btn btn-sm" onclick="toggleUserRole('${u.id}', '${u.role}')">${u.role === 'admin' ? t('降为普通') : t('升为管理')}</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteUser('${u.id}', '${esc(u.username)}')">${t('删除')}</button>
       </td>
     </tr>`).join('')}
     </tbody></table>`;
@@ -275,14 +281,14 @@ async function createUser() {
   const username = ($('new-username') || {}).value || '';
   const password = ($('new-password') || {}).value || '';
   const role = ($('new-role') || {}).value || 'user';
-  if (!username || !password) { toast('请输入用户名和密码', 'err'); return; }
+  if (!username || !password) { toast(t('请输入用户名和密码'), 'err'); return; }
   try {
     await api('/api/users', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password, role }),
     });
-    toast('用户已创建', 'ok');
+    toast(t('用户已创建'), 'ok');
     $('new-username').value = '';
     $('new-password').value = '';
     await loadUsers();
@@ -290,25 +296,25 @@ async function createUser() {
 }
 
 async function deleteUser(uid, name) {
-  if (!confirm(`确定删除用户「${name}」？该用户的所有数据将被清除。`)) return;
+  if (!confirm(t('确定删除用户「{name}」？该用户的所有数据将被清除。', { name }))) return;
   try {
     await api(`/api/users/${uid}`, { method: 'DELETE' });
-    toast('用户已删除', 'ok');
+    toast(t('用户已删除'), 'ok');
     await loadUsers();
   } catch (e) { toast(e.message, 'err'); }
 }
 
 async function changeUserPassword(uid, name) {
-  const pw = prompt(`为用户「${name}」设置新密码（至少4位）：`);
+  const pw = prompt(t('为用户「{name}」设置新密码（至少4位）：', { name }));
   if (!pw) return;
-  if (pw.length < 4) { toast('密码至少 4 个字符', 'err'); return; }
+  if (pw.length < 4) { toast(t('密码至少 4 个字符'), 'err'); return; }
   try {
     await api(`/api/users/${uid}/password`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ new_password: pw }),
     });
-    toast('密码已更新', 'ok');
+    toast(t('密码已更新'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -320,7 +326,7 @@ async function toggleUserRole(uid, currentRole) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role: newRole }),
     });
-    toast('角色已更新', 'ok');
+    toast(t('角色已更新'), 'ok');
     await loadUsers();
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -332,7 +338,7 @@ function esc(s) {
 }
 
 function maskKey(k) {
-  if (!k) return '（未填写）';
+  if (!k) return t('（未填写）');
   if (k.length <= 8) return k;
   return k.slice(0, 4) + '••••••' + k.slice(-4);
 }
@@ -571,7 +577,7 @@ async function loadProviders() {
   state.presets = d.presets || {};
   renderProviders();
   const sel = $('preset-select');
-  sel.innerHTML = '<option value="">自定义</option>';
+  sel.innerHTML = `<option value="">${t('自定义')}</option>`;
   Object.entries(state.presets).forEach(([name, url]) => {
     const o = document.createElement('option');
     o.value = url; o.textContent = name;
@@ -627,19 +633,19 @@ function renderPromptConfig() {
     <div class="card prompt-config-item" data-key="${key}">
       <div class="row">
         <span class="title">${esc(d.label)}</span>
-        <span class="badge ${isCustom ? 'prompt-custom-badge' : ''}">${isCustom ? '已自定义' : '默认'}</span>
+        <span class="badge ${isCustom ? 'prompt-custom-badge' : ''}">${isCustom ? t('已自定义') : t('默认')}</span>
         <span class="spacer"></span>
-        <button class="btn" onclick="togglePromptEditor('${key}')">编辑</button>
-        <button class="btn danger" onclick="resetPrompt('${key}')" ${isCustom ? '' : 'disabled'}>恢复默认</button>
+        <button class="btn" onclick="togglePromptEditor('${key}')">${t('编辑')}</button>
+        <button class="btn danger" onclick="resetPrompt('${key}')" ${isCustom ? '' : 'disabled'}>${t('恢复默认')}</button>
       </div>
       <div class="meta">${esc(d.desc || '')}</div>
       ${varList ? `<div class="prompt-vars">${varList}</div>` : ''}
       <div class="prompt-editor" id="prompt-editor-${key}" style="display:none">
         <textarea class="prompt-editor-ta" id="prompt-ta-${key}" rows="10">${esc(custom[key] || '')}</textarea>
         <div class="row" style="margin-top:8px">
-          <button class="btn primary" onclick="savePrompt('${key}')">保存</button>
-          <button class="btn" onclick="cancelPromptEdit('${key}')">取消</button>
-          <span class="hint">留空并保存即恢复默认</span>
+          <button class="btn primary" onclick="savePrompt('${key}')">${t('保存')}</button>
+          <button class="btn" onclick="cancelPromptEdit('${key}')">${t('取消')}</button>
+          <span class="hint">${t('留空并保存即恢复默认')}</span>
         </div>
       </div>
     </div>`;
@@ -654,7 +660,7 @@ function togglePromptEditor(key) {
   if (isHidden) {
     const ta = $('prompt-ta-' + key);
     if (ta && !ta.value && promptConfigState.defs[key]) {
-      ta.placeholder = promptConfigState.defs[key].default.slice(0, 200) + '……（当前使用默认模板）';
+      ta.placeholder = promptConfigState.defs[key].default.slice(0, 200) + '……' + t('（当前使用默认模板）');
     }
   }
 }
@@ -675,12 +681,12 @@ async function savePrompt(key) {
     });
     promptConfigState.custom = d.prompts || {};
     renderPromptConfig();
-    toast(val.trim() ? '提示词已保存' : '已恢复默认', 'ok');
+    toast(val.trim() ? t('提示词已保存') : t('已恢复默认'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
 async function resetPrompt(key) {
-  if (!confirm('确定恢复该提示词为默认模板？')) return;
+  if (!confirm(t('确定恢复该提示词为默认模板？'))) return;
   try {
     const d = await api('/api/prompts', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -688,14 +694,14 @@ async function resetPrompt(key) {
     });
     promptConfigState.custom = d.prompts || {};
     renderPromptConfig();
-    toast('已恢复默认', 'ok');
+    toast(t('已恢复默认'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
 function proxyLabel(p) {
-  if (p.proxy === 'system') return '系统代理';
-  if (p.proxy && p.proxy !== 'direct') return '自定义代理';
-  return '直连';
+  if (p.proxy === 'system') return t('系统代理');
+  if (p.proxy && p.proxy !== 'direct') return t('自定义代理');
+  return t('直连');
 }
 
 function renderProviders() {
@@ -709,19 +715,23 @@ function renderProviders() {
         const modelsHtml = models.map(m => {
           const isText = s.text_model_id === m.id;
           const isVision = s.vision_model_id === m.id;
+          const isImage = s.image_model_id === m.id;
+          const typeLabel = m.type === 'vision' ? t('视觉') : m.type === 'image' ? t('图片') : t('文本');
+          const typeBadge = m.type === 'vision' ? 'badge-vision' : m.type === 'image' ? 'badge-image' : '';
           return `
         <div class="model-item">
           <span class="title">${esc(m.name)}</span>
-          <span class="badge ${m.type === 'vision' ? 'badge-vision' : ''}">${m.type === 'vision' ? '视觉' : '文本'}</span>
+          <span class="badge ${typeBadge}">${typeLabel}</span>
           ${m.temperature != null && m.temperature !== '' ? `<span class="meta">temp=${m.temperature}</span>` : ''}
           ${m.max_tokens ? `<span class="meta">max_tokens=${m.max_tokens}</span>` : ''}
-          ${m.context_length ? `<span class="meta">上下文=${m.context_length}</span>` : ''}
+          ${m.context_length ? `<span class="meta">${t('上下文')}=${m.context_length}</span>` : ''}
           <span class="spacer"></span>
-          <button class="btn role-mark ${isText ? 'on' : ''}" onclick="setModelRole('${p.id}','${m.id}','text')" title="设为当前文本生成模型">${isText ? '●' : '○'}文本</button>
-          <button class="btn role-mark ${isVision ? 'on' : ''}" onclick="setModelRole('${p.id}','${m.id}','vision')" title="设为当前视觉分析模型">${isVision ? '●' : '○'}视觉</button>
-          <button class="btn" onclick="testModel('${p.id}','${m.id}')">测试</button>
-          <button class="btn" onclick="editModel('${p.id}','${m.id}')">编辑</button>
-          <button class="btn danger" onclick="deleteModel('${p.id}','${m.id}')">删除</button>
+          <button class="btn role-mark ${isText ? 'on' : ''}" onclick="setModelRole('${p.id}','${m.id}','text')" title="${t('设为当前文本生成模型')}">${isText ? '●' : '○'}${t('文本')}</button>
+          <button class="btn role-mark ${isVision ? 'on' : ''}" onclick="setModelRole('${p.id}','${m.id}','vision')" title="${t('设为当前视觉分析模型')}">${isVision ? '●' : '○'}${t('视觉')}</button>
+          <button class="btn role-mark ${isImage ? 'on' : ''}" onclick="setModelRole('${p.id}','${m.id}','image')" title="${t('设为当前图片生成模型')}">${isImage ? '●' : '○'}${t('图片')}</button>
+          <button class="btn" onclick="testModel('${p.id}','${m.id}')">${t('测试')}</button>
+          <button class="btn" onclick="editModel('${p.id}','${m.id}')">${t('编辑')}</button>
+          <button class="btn danger" onclick="deleteModel('${p.id}','${m.id}')">${t('删除')}</button>
         </div>`;
         }).join('');
 
@@ -731,25 +741,25 @@ function renderProviders() {
           <span class="title">${esc(p.name)}</span>
           <span class="badge">${proxyLabel(p)}</span>
           <span class="spacer"></span>
-          <button class="btn" id="btn-connect-${p.id}" onclick="connectProvider('${p.id}')">🔌 连接</button>
-          <button class="btn" onclick="startEditProvider('${p.id}')">编辑服务商</button>
-          <button class="btn danger" onclick="deleteProvider('${p.id}')">删除</button>
+          <button class="btn" id="btn-connect-${p.id}" onclick="connectProvider('${p.id}')">🔌 ${t('连接')}</button>
+          <button class="btn" onclick="startEditProvider('${p.id}')">${t('编辑服务商')}</button>
+          <button class="btn danger" onclick="deleteProvider('${p.id}')">${t('删除')}</button>
         </div>
         <div class="meta">${esc(p.base_url)}</div>
         <div class="meta mask">Key: ${esc(maskKey(p.api_key))}</div>
-        <div class="meta">连接：<span id="connect-status-${p.id}">${list.length ? `已缓存 ${list.length} 个模型` : '未连接'}</span></div>
+        <div class="meta">${t('连接')}：<span id="connect-status-${p.id}">${list.length ? t('已缓存 {n} 个模型', { n: list.length }) : t('未连接')}</span></div>
         <div class="model-section">
           <div class="row" style="margin:10px 0 6px">
-            <span class="meta"><b>模型（${models.length}）</b></span>
+            <span class="meta"><b>${t('模型')}（${models.length}）</b></span>
             <span class="spacer"></span>
-            <button class="btn" onclick="toggleAddModel('${p.id}')">${open ? '收起' : '＋ 添加模型'}</button>
+            <button class="btn" onclick="toggleAddModel('${p.id}')">${open ? t('收起') : '＋ ' + t('添加模型')}</button>
           </div>
-          ${modelsHtml || '<div class="meta" style="margin:4px 0">暂无模型，先「连接」拉取列表再添加。</div>'}
+          ${modelsHtml || `<div class="meta" style="margin:4px 0">${t('暂无模型，先「连接」拉取列表再添加。')}</div>`}
           ${renderModelForm(p, open)}
         </div>
       </div>`;
       }).join('')
-    : '<div class="card meta">暂无服务商，请在下方添加。</div>';
+    : `<div class="card meta">${t('暂无服务商，请在下方添加。')}</div>`;
 }
 
 function renderModelForm(p, open) {
@@ -758,32 +768,33 @@ function renderModelForm(p, open) {
   const model = editing ? (p.models || []).find(m => m.id === editing.mid) : null;
   const list = state.modelLists[pid] || [];
   const dlId = 'dl-' + pid;
-  const isVision = model && model.type === 'vision';
+  const mtype = model ? (model.type || 'text') : 'text';
   return `
     <div id="model-form-${pid}" style="${open ? '' : 'display:none'}" class="model-form">
       <datalist id="${dlId}">${list.map(m => `<option value="${esc(m)}"></option>`).join('')}</datalist>
       <div class="form-grid">
-        <label>模型名
-          <input id="mf-name-${pid}" list="${dlId}" placeholder="连接后从列表选择，也可手输" value="${esc(model ? model.name : '')}">
+        <label>${t('模型名')}
+          <input id="mf-name-${pid}" list="${dlId}" placeholder="${t('连接后从列表选择，也可手输')}" value="${esc(model ? model.name : '')}">
         </label>
-        <label>类型（二选一）
+        <label>${t('类型')}
           <span class="radio-group">
-            <label class="radio-inline"><input type="radio" name="mf-type-${pid}" value="text" ${!isVision ? 'checked' : ''}> 文本</label>
-            <label class="radio-inline"><input type="radio" name="mf-type-${pid}" value="vision" ${isVision ? 'checked' : ''}> 视觉</label>
+            <label class="radio-inline"><input type="radio" name="mf-type-${pid}" value="text" ${mtype === 'text' ? 'checked' : ''}> ${t('文本')}</label>
+            <label class="radio-inline"><input type="radio" name="mf-type-${pid}" value="vision" ${mtype === 'vision' ? 'checked' : ''}> ${t('视觉')}</label>
+            <label class="radio-inline"><input type="radio" name="mf-type-${pid}" value="image" ${mtype === 'image' ? 'checked' : ''}> ${t('图片')}</label>
           </span>
         </label>
-        <label>temperature（可选，留空用全局）
-          <input id="mf-temp-${pid}" type="number" step="0.1" min="0" max="1.5" placeholder="如 0.8" value="${model && model.temperature != null ? model.temperature : ''}">
+        <label>${t('temperature（可选，留空用全局）')}
+          <input id="mf-temp-${pid}" type="number" step="0.1" min="0" max="1.5" placeholder="${t('如 0.8')}" value="${model && model.temperature != null ? model.temperature : ''}">
         </label>
-        <label>max_tokens（可选，留空按字数自动）
-          <input id="mf-max-${pid}" type="number" min="1" placeholder="如 4096" value="${model && model.max_tokens ? model.max_tokens : ''}">
+        <label>${t('max_tokens（可选，留空按字数自动）')}
+          <input id="mf-max-${pid}" type="number" min="1" placeholder="${t('如 4096')}" value="${model && model.max_tokens ? model.max_tokens : ''}">
         </label>
-        <label>上下文长度 context_length（可选，超长输入会自动截断）
-          <input id="mf-ctx-${pid}" type="number" min="1024" step="1024" placeholder="如 32768 / 128000" value="${model && model.context_length ? model.context_length : ''}">
+        <label>${t('上下文长度 context_length（可选，超长输入会自动截断）')}
+          <input id="mf-ctx-${pid}" type="number" min="1024" step="1024" placeholder="${t('如 32768 / 128000')}" value="${model && model.context_length ? model.context_length : ''}">
         </label>
       </div>
-      <button class="btn primary" onclick="saveModel('${pid}')">${model ? '保存模型修改' : '保存模型'}</button>
-      <button class="btn" onclick="closeModelForm('${pid}')">取消</button>
+      <button class="btn primary" onclick="saveModel('${pid}')">${model ? t('保存模型修改') : t('保存模型')}</button>
+      <button class="btn" onclick="closeModelForm('${pid}')">${t('取消')}</button>
     </div>`;
 }
 
@@ -794,7 +805,7 @@ async function connectProvider(pid) {
   const btn = $('btn-connect-' + pid);
   if (!status || !btn) return;
   btn.disabled = true;
-  status.textContent = '连接中…';
+  status.textContent = t('连接中…');
   status.style.color = 'var(--muted)';
   try {
     const r = await api('/api/providers/connect', {
@@ -803,13 +814,13 @@ async function connectProvider(pid) {
     });
     if (r.ok) {
       state.modelLists[pid] = r.models || [];
-      status.textContent = `✓ 已缓存 ${r.models.length} 个模型`;
+      status.textContent = '✓ ' + t('已缓存 {n} 个模型', { n: r.models.length });
       status.style.color = 'var(--ok)';
-      toast('连接成功，可添加模型', 'ok');
+      toast(t('连接成功，可添加模型'), 'ok');
     } else {
       status.textContent = '✗ ' + (r.message || '连接失败');
       status.style.color = 'var(--danger)';
-      toast(r.message || '连接失败', 'err');
+      toast(r.message || t('连接失败'), 'err');
     }
   } catch (e) {
     status.textContent = '✗ ' + e.message;
@@ -846,7 +857,7 @@ function closeModelForm(pid) {
 
 async function saveModel(pid) {
   const name = $('mf-name-' + pid).value.trim();
-  if (!name) return toast('请填写模型名', 'err');
+  if (!name) return toast(t('请填写模型名'), 'err');
   const checked = document.querySelector(`input[name="mf-type-${pid}"]:checked`);
   const type = checked ? checked.value : 'text';
   const tempVal = $('mf-temp-' + pid).value.trim();
@@ -864,12 +875,12 @@ async function saveModel(pid) {
       await api(`/api/providers/${pid}/models/${state.editingModel.mid}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
-      toast('模型已更新', 'ok');
+      toast(t('模型已更新'), 'ok');
     } else {
       await api(`/api/providers/${pid}/models`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
-      toast('模型已添加', 'ok');
+      toast(t('模型已添加'), 'ok');
     }
     state.addModelOpen = null;
     state.editingModel = null;
@@ -878,14 +889,14 @@ async function saveModel(pid) {
 }
 
 async function deleteModel(pid, mid) {
-  if (!confirm('确定删除该模型？')) return;
+  if (!confirm(t('确定删除该模型？'))) return;
   await api(`/api/providers/${pid}/models/${mid}`, { method: 'DELETE' });
   await loadProviders();
   await loadSettings();
 }
 
 async function testModel(pid, mid) {
-  toast('测试中…');
+  toast(t('测试中…'));
   try {
     const r = await api(`/api/providers/${pid}/models/${mid}/test`, { method: 'POST' });
     toast(r.message, r.ok ? 'ok' : 'err');
@@ -893,14 +904,20 @@ async function testModel(pid, mid) {
 }
 
 async function setModelRole(pid, mid, role) {
-  const field = role === 'text' ? 'text_model_id' : 'vision_model_id';
+  const fieldMap = { text: 'text_model_id', vision: 'vision_model_id', image: 'image_model_id' };
+  const field = fieldMap[role] || 'text_model_id';
+  const toastMap = {
+    text: t('已设为当前文本生成模型'),
+    vision: t('已设为当前视觉分析模型'),
+    image: t('已设为当前图片生成模型'),
+  };
   try {
     state.settings = await api('/api/settings', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ [field]: mid }),
     });
     renderProviders();
-    toast(role === 'text' ? '已设为当前文本生成模型' : '已设为当前视觉分析模型', 'ok');
+    toast(toastMap[role] || toastMap.text, 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -911,18 +928,18 @@ async function saveProviderForm() {
     api_key: $('p-key').value.trim(),
     proxy: $('p-proxy').value === 'custom' ? ($('p-proxy-url').value.trim() || 'custom') : $('p-proxy').value,
   };
-  if (!body.base_url) return toast('请填写 Base URL', 'err');
+  if (!body.base_url) return toast(t('请填写 Base URL'), 'err');
   try {
     if (state.editingProviderId) {
       await api('/api/providers/' + state.editingProviderId, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
-      toast('服务商已更新', 'ok');
+      toast(t('服务商已更新'), 'ok');
     } else {
       await api('/api/providers', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
-      toast('服务商已添加', 'ok');
+      toast(t('服务商已添加'), 'ok');
     }
     resetProviderForm();
     await loadProviders();
@@ -938,8 +955,8 @@ function startEditProvider(id) {
   $('p-key').value = p.api_key || '';
   $('p-proxy').value = (p.proxy && p.proxy !== 'direct' && p.proxy !== 'system') ? 'custom' : (p.proxy || 'direct');
   $('p-proxy-url').value = (p.proxy && p.proxy !== 'direct' && p.proxy !== 'system') ? p.proxy : '';
-  $('provider-form-title').textContent = '编辑服务商：' + p.name;
-  $('btn-provider-save').textContent = '保存修改';
+  $('provider-form-title').textContent = t('编辑服务商') + '：' + p.name;
+  $('btn-provider-save').textContent = t('保存修改');
   $('btn-provider-cancel').style.display = '';
   $('provider-form-title').scrollIntoView({ behavior: 'smooth' });
 }
@@ -952,13 +969,13 @@ function resetProviderForm() {
   state.editingProviderId = null;
   ['p-name', 'p-base', 'p-key', 'p-proxy-url'].forEach(i => $(i).value = '');
   $('p-proxy').value = 'direct';
-  $('provider-form-title').textContent = '添加服务商';
-  $('btn-provider-save').textContent = '＋ 添加服务商';
+  $('provider-form-title').textContent = t('添加服务商');
+  $('btn-provider-save').textContent = '＋ ' + t('添加服务商');
   $('btn-provider-cancel').style.display = 'none';
 }
 
 async function deleteProvider(id) {
-  if (!confirm('确定删除该服务商（含其下所有模型）？')) return;
+  if (!confirm(t('确定删除该服务商（含其下所有模型）？'))) return;
   await api('/api/providers/' + id, { method: 'DELETE' });
   delete state.modelLists[id];
   await loadProviders();
@@ -998,7 +1015,7 @@ async function saveSettings() {
   };
   try {
     state.settings = await api('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    toast('生成参数已保存', 'ok');
+    toast(t('生成参数已保存'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -1048,7 +1065,7 @@ function charCoverHTML(c) {
   }
   return `<div class="char-cover-ph">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-    <span>未上传照片</span>
+    <span>${t('未上传照片')}</span>
   </div>`;
 }
 
@@ -1084,14 +1101,14 @@ function openCharCard(id) {
   if (!c) return;
   const overlay = $('char-card-overlay');
   if (!overlay) return;
-  $('char-card-title').textContent = c.name || '未命名';
+  $('char-card-title').textContent = c.name || t('未命名');
   $('char-card-photo').innerHTML = charCoverHTML(c);
-  $('char-card-appearance').textContent = c.appearance || '暂无';
-  $('char-card-personality').textContent = c.personality || '暂无';
+  $('char-card-appearance').textContent = c.appearance || t('暂无');
+  $('char-card-personality').textContent = c.personality || t('暂无');
   // 背景设定跟随小说：优先显示本书背景，无则回退角色库背景（兼容旧数据）
   const bookBg = (state.novel && state.novel.character_backgrounds && state.novel.character_backgrounds[id]) || '';
-  $('char-card-background').textContent = bookBg || c.background || '（背景设定跟随各小说，请从小说创作进入角色卡填写本书背景）';
-  $('char-card-notes').textContent = c.notes || '暂无';
+  $('char-card-background').textContent = bookBg || c.background || t('（背景设定跟随各小说，请从小说创作进入角色卡填写本书背景）');
+  $('char-card-notes').textContent = c.notes || t('暂无');
   // 记录当前角色 id，供「编辑角色」使用
   overlay.dataset.cid = id;
   overlay.style.display = 'flex';
@@ -1135,28 +1152,28 @@ function renderCharacterGrid() {
   if (hintEl) {
     if (novelId) {
       const novel = (characterNovelList || []).find(n => n.id === novelId);
-      hintEl.textContent = novel ? `《${novel.title || '未命名'}》共 ${chars.length} 个角色。` : '该小说暂无角色。';
+      hintEl.textContent = novel ? `《${novel.title || t('未命名')}》${t('共 {n} 个角色。', { n: chars.length })}` : t('该小说暂无角色。');
     } else {
-      hintEl.textContent = `展示最新的 ${chars.length} 个角色。`;
+      hintEl.textContent = t('展示最新的 {n} 个角色。', { n: chars.length });
     }
   }
 
   if (!chars.length) {
     const emptyMsg = novelId
-      ? '该小说暂无角色，点击右上角「添加角色」创建，或在小说创作向导中添加。'
-      : '暂无角色，点击右上角「添加角色」创建你的第一个角色。';
+      ? t('该小说暂无角色，点击右上角「添加角色」创建，或在小说创作向导中添加。')
+      : t('暂无角色，点击右上角「添加角色」创建你的第一个角色。');
     box.innerHTML = `<div class="card meta" style="grid-column:1/-1">${emptyMsg}</div>`;
     return;
   }
 
   box.innerHTML = chars.map(c => `
     <div class="char-grid-card">
-      <div class="char-grid-cover" onclick="openCharFromList('${c.id}')" title="点击查看/编辑角色">
+      <div class="char-grid-cover" onclick="openCharFromList('${c.id}')" title="${t('点击查看/编辑角色')}">
         ${charCoverHTML(c)}
       </div>
       <div class="char-grid-body">
-        <div class="char-grid-name" onclick="openCharFromList('${c.id}')">${esc(c.name || '未命名')}</div>
-        <div class="meta">${esc((c.appearance || '').slice(0, 40)) || '暂无外貌描述'}</div>
+        <div class="char-grid-name" onclick="openCharFromList('${c.id}')">${esc(c.name || t('未命名'))}</div>
+        <div class="meta">${esc((c.appearance || '').slice(0, 40)) || t('暂无外貌描述')}</div>
       </div>
     </div>`).join('');
 }
@@ -1167,8 +1184,8 @@ function renderCharacterNovelFilter() {
   if (!sel) return;
   const prev = sel.value;
   const novels = characterNovelList || [];
-  sel.innerHTML = '<option value="">最新角色（默认）</option>' + novels.map(n =>
-    `<option value="${esc(n.id)}">${esc(n.title || '未命名')}</option>`).join('');
+  sel.innerHTML = `<option value="">${t('最新角色（默认）')}</option>` + novels.map(n =>
+    `<option value="${esc(n.id)}">${esc(n.title || t('未命名'))}</option>`).join('');
   if (prev && novels.some(n => n.id === prev)) {
     sel.value = prev;
   }
@@ -1190,18 +1207,18 @@ function renderCharacters() {
   box.innerHTML = chars.length
     ? chars.map(c => `
       <div class="char-grid-card">
-        <div class="char-grid-cover" onclick="openCharFromWizard('${c.id}')" title="点击查看/编辑角色">
+        <div class="char-grid-cover" onclick="openCharFromWizard('${c.id}')" title="${t('点击查看/编辑角色')}">
           ${charCoverHTML(c)}
         </div>
         <div class="char-grid-body">
           <div class="row">
-            <span class="char-grid-name" onclick="openCharFromWizard('${c.id}')">${esc(c.name || '未命名')}</span>
+            <span class="char-grid-name" onclick="openCharFromWizard('${c.id}')">${esc(c.name || t('未命名'))}</span>
             <span class="spacer"></span>
-            <button class="btn danger" onclick="removeCharacterFromNovel('${c.id}')">移除</button>
+            <button class="btn danger" onclick="removeCharacterFromNovel('${c.id}')">${t('移除')}</button>
           </div>
         </div>
       </div>`).join('')
-    : '<div class="card meta" style="grid-column:1/-1">本小说还没有角色，点击「添加角色」新增。</div>';
+    : `<div class="card meta" style="grid-column:1/-1">${t('本小说还没有角色，点击「添加角色」新增。')}</div>`;
 }
 
 // —— 角色库列表页入口：点卡片进详情 ——
@@ -1238,7 +1255,7 @@ function goAddCharacterFromList() {
 
 // 添加角色（小说向导入口：新角色自动归入本小说）
 async function goAddCharacterFromWizard() {
-  if (!state.novel) return toast('请先完成基本信息', 'err');
+  if (!state.novel) return toast(t('请先完成基本信息'), 'err');
   charBackHash = '#/novels/' + state.novel.id + '/edit';
   charAssignNovelId = state.novel.id;
   resumeWizardStep = 2;
@@ -1267,7 +1284,7 @@ function renderCharacterPicker() {
   const chars = state.characters || [];
   const currentIds = (state.novel && state.novel.character_ids) || [];
   if (!chars.length) {
-    box.innerHTML = '<div class="meta">角色库为空，请先「新建角色」。</div>';
+    box.innerHTML = `<div class="meta">${t('角色库为空，请先「新建角色」。')}</div>`;
     return;
   }
   box.innerHTML = chars.map(c => {
@@ -1276,7 +1293,7 @@ function renderCharacterPicker() {
     <label class="character-picker-item">
       <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleNovelCharacter('${c.id}', this.checked)">
       ${charCoverHTML(c)}
-      <span class="character-picker-name">${esc(c.name || '未命名')}</span>
+      <span class="character-picker-name">${esc(c.name || t('未命名'))}</span>
     </label>`;
   }).join('');
 }
@@ -1324,13 +1341,13 @@ function resetCharacterNewForm() {
   newCharPhotoBlob = null;
   renderNewPhotoPreview();
   const title = $('character-new-title');
-  if (title) title.textContent = charAssignNovelId ? '添加角色（将归入当前小说）' : '添加角色';
+  if (title) title.textContent = charAssignNovelId ? t('添加角色（将归入当前小说）') : t('添加角色');
 }
 
 // 保存新角色
 async function saveNewCharacter() {
   const name = $('c-new-name').value.trim();
-  if (!name) return toast('请填写角色姓名', 'err');
+  if (!name) return toast(t('请填写角色姓名'), 'err');
   try {
     const d = await api('/api/characters', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1343,7 +1360,7 @@ async function saveNewCharacter() {
     });
     const cid = d.character.id;
     if (newCharPhotoBlob) {
-      showLoading('正在上传照片…', '');
+      showLoading(t('正在上传照片…'), '');
       try { await uploadPhoto(cid, newCharPhotoBlob); newCharPhotoBlob = null; }
       finally { hideLoading(); }
     }
@@ -1362,7 +1379,7 @@ async function saveNewCharacter() {
       charAssignNovelId = null;
     }
     await loadAllCharacters();
-    toast('角色已添加', 'ok');
+    toast(t('角色已添加'), 'ok');
     // 进入详情页继续完善
     nav('#/characters/' + cid);
   } catch (e) { toast(e.message, 'err'); }
@@ -1372,16 +1389,16 @@ async function saveNewCharacter() {
 async function openCharacterDetail(id) {
   if (!state.characters.length) { await loadAllCharacters(); }
   const c = state.characters.find(x => x.id === id);
-  if (!c) { toast('角色不存在', 'err'); nav('#/characters'); return; }
+  if (!c) { toast(t('角色不存在'), 'err'); nav('#/characters'); return; }
   charDetailId = id;
   const title = $('character-detail-title');
-  if (title) title.textContent = '角色详情 · ' + (c.name || '未命名');
+  if (title) title.textContent = t('角色详情') + ' · ' + (c.name || t('未命名'));
   const photo = $('c-detail-photo');
   photo.innerHTML = c.photo_path
     ? `<img src="/${esc(c.photo_path)}" alt="${esc(c.name || '')}">`
     : `<div class="char-cover-ph">
          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-         <span>未上传照片</span>
+         <span>${t('未上传照片')}</span>
        </div>`;
   $('c-detail-name').value = c.name || '';
   $('c-detail-appearance').value = c.appearance || '';
@@ -1409,7 +1426,7 @@ async function saveCharacterDetail() {
   const id = charDetailId;
   if (!id) return;
   const name = $('c-detail-name').value.trim();
-  if (!name) return toast('角色姓名不能为空', 'err');
+  if (!name) return toast(t('角色姓名不能为空'), 'err');
   try {
     await api('/api/characters/' + id, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -1435,8 +1452,8 @@ async function saveCharacterDetail() {
     }
     await loadAllCharacters();
     const title = $('character-detail-title');
-    if (title) title.textContent = '角色详情 · ' + name;
-    toast('角色已保存', 'ok');
+    if (title) title.textContent = t('角色详情') + ' · ' + name;
+    toast(t('角色已保存'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -1449,10 +1466,10 @@ function uploadDetailPhoto() {
   input.onchange = () => {
     if (!input.files.length) return;
     cropFromFile(input.files[0], async (blob) => {
-      showLoading('正在上传照片…', '');
+      showLoading(t('正在上传照片…'), '');
       try {
         await uploadPhoto(id, blob);
-        toast('照片已更新', 'ok');
+        toast(t('照片已更新'), 'ok');
         await loadAllCharacters();
         openCharacterDetail(id);
       } catch (e) { toast(e.message, 'err'); }
@@ -1467,19 +1484,19 @@ async function analyzeDetailPhoto() {
   const id = charDetailId;
   if (!id) return;
   const c = state.characters.find(x => x.id === id);
-  if (!c || !c.photo_path) return toast('请先上传照片', 'err');
+  if (!c || !c.photo_path) return toast(t('请先上传照片'), 'err');
   const appEl = $('c-detail-appearance'), perEl = $('c-detail-personality');
-  if ((appEl.value.trim() || perEl.value.trim()) && !confirm('外貌/性格已有内容，确定用 AI 分析结果覆盖吗？')) return;
-  showLoading('正在分析人物照片…', 'AI 正在识别外貌、穿着与性格特征，请稍候');
+  if ((appEl.value.trim() || perEl.value.trim()) && !confirm(t('外貌/性格已有内容，确定用 AI 分析结果覆盖吗？'))) return;
+  showLoading(t('正在分析人物照片…'), t('AI 正在识别外貌、穿着与性格特征，请稍候'));
   try {
     const blob = await fetch('/' + c.photo_path).then(r => {
-      if (!r.ok) throw new Error('照片读取失败');
+      if (!r.ok) throw new Error(t('照片读取失败'));
       return r.blob();
     });
     const r = await analyzePhotoBlob(blob);
     appEl.value = r.appearance || '';
     perEl.value = r.personality || '';
-    toast('分析完成，请确认后点击「保存」', 'ok');
+    toast(t('分析完成，请确认后点击「保存」'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
   finally { hideLoading(); }
 }
@@ -1488,11 +1505,11 @@ async function analyzeDetailPhoto() {
 async function deleteCharacterDetail() {
   const id = charDetailId;
   if (!id) return;
-  if (!confirm('确定删除该角色？此操作不可恢复。')) return;
+  if (!confirm(t('确定删除该角色？此操作不可恢复。'))) return;
   try {
     await api('/api/characters/' + id, { method: 'DELETE' });
     await loadAllCharacters();
-    toast('角色已删除', 'ok');
+    toast(t('角色已删除'), 'ok');
     goBackFromCharacter();
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -1500,7 +1517,7 @@ async function deleteCharacterDetail() {
 // 小说向导：仅从本小说移除角色（不删除角色本身）
 async function removeCharacterFromNovel(id) {
   if (!state.novel) return;
-  if (!confirm('确定将该角色从本小说移除？（角色本身不会被删除）')) return;
+  if (!confirm(t('确定将该角色从本小说移除？（角色本身不会被删除）'))) return;
   try {
     const ids = (state.novel.character_ids || []).filter(x => x !== id);
     const nd = await api('/api/novels/' + state.novel.id, {
@@ -1512,7 +1529,7 @@ async function removeCharacterFromNovel(id) {
     renderCharacters();
     renderRelations();
     loadNovels();
-    toast('已从本小说移除', 'ok');
+    toast(t('已从本小说移除'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -1537,7 +1554,7 @@ function onNewPhotoPicked(input) {
   cropFromFile(input.files[0], (blob) => {
     newCharPhotoBlob = blob;
     renderNewPhotoPreview();
-    toast('照片已就绪，可点击「AI 分析」识别外貌与性格', 'ok');
+    toast(t('照片已就绪，可点击「AI 分析」识别外貌与性格'), 'ok');
   });
   input.value = '';
 }
@@ -1565,15 +1582,50 @@ function rePickNewPhoto() {
 
 // 添加页：手动触发 AI 分析已选照片
 async function analyzeNewPhoto() {
-  if (!newCharPhotoBlob) return toast('请先选择并裁切照片', 'err');
+  if (!newCharPhotoBlob) return toast(t('请先选择并裁切照片'), 'err');
   const appEl = $('c-new-appearance'), perEl = $('c-new-personality');
-  if ((appEl.value.trim() || perEl.value.trim()) && !confirm('外貌/性格已有内容，确定用 AI 分析结果覆盖吗？')) return;
-  showLoading('正在分析人物照片…', 'AI 正在识别外貌、穿着与性格特征，请稍候');
+  if ((appEl.value.trim() || perEl.value.trim()) && !confirm(t('外貌/性格已有内容，确定用 AI 分析结果覆盖吗？'))) return;
+  showLoading(t('正在分析人物照片…'), t('AI 正在识别外貌、穿着与性格特征，请稍候'));
   try {
     const r = await analyzePhotoBlob(newCharPhotoBlob);
     appEl.value = r.appearance || '';
     perEl.value = r.personality || '';
-    toast('分析完成，请检查并确认后保存', 'ok');
+    toast(t('分析完成，请检查并确认后保存'), 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+  finally { hideLoading(); }
+}
+
+// 添加页：打开 AI 生图弹窗（预填角色外貌描述作为提示词）
+function genNewPhoto() {
+  $('genimg-prompt').value = ($('c-new-appearance').value || '').trim();
+  $('genimg-overlay').classList.add('show');
+}
+
+function closeGenImg() {
+  $('genimg-overlay').classList.remove('show');
+}
+
+// 添加页：调用后端文生图，结果赋给 newCharPhotoBlob（复用预览/保存/分析链路）
+async function runGenPhoto() {
+  const prompt = $('genimg-prompt').value.trim();
+  if (!prompt) return toast(t('请输入生图提示词'), 'err');
+  closeGenImg();
+  showLoading(t('正在生成照片…'), t('AI 正在绘制图片，可能需要数十秒，请稍候'));
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (authToken) headers['Authorization'] = 'Bearer ' + authToken;
+    const res = await fetch('/api/generate-character-photo', {
+      method: 'POST', headers, body: JSON.stringify({ prompt }),
+    });
+    if (!res.ok) {
+      let msg = t('请求失败（{n}）', { n: res.status });
+      try { const d = await res.json(); if (d && d.detail) msg = String(d.detail); } catch (e) { /* 非 JSON */ }
+      if (res.status === 401) handleUnauthorized();
+      throw new Error(msg);
+    }
+    newCharPhotoBlob = await res.blob();
+    renderNewPhotoPreview();
+    toast(t('照片已就绪，可点击「AI 分析」识别外貌与性格'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
   finally { hideLoading(); }
 }
@@ -1587,10 +1639,10 @@ function cropFromFile(file, onDone) {
   reader.onload = () => {
     const img = new Image();
     img.onload = () => openCropModal(img, reader.result, onDone);
-    img.onerror = () => toast('无法读取该图片', 'err');
+    img.onerror = () => toast(t('无法读取该图片'), 'err');
     img.src = reader.result;
   };
-  reader.onerror = () => toast('无法读取该图片', 'err');
+  reader.onerror = () => toast(t('无法读取该图片'), 'err');
   reader.readAsDataURL(file);
 }
 
@@ -1702,7 +1754,7 @@ function applyCrop() {
   closeCropModal();
   canvas.toBlob((blob) => {
     if (blob && onDone) onDone(blob);
-    else if (!blob) toast('裁切失败，请重试', 'err');
+    else if (!blob) toast(t('裁切失败，请重试'), 'err');
   }, 'image/jpeg', 0.92);
 }
 
@@ -1721,8 +1773,8 @@ function renderNovelFilterOptions() {
   const sel = $('novel-model-filter');
   if (!sel) return;
   const cur = sel.value;
-  const opts = ['<option value="">全部模型</option>'];
-  opts.push('<option value="__global__">全局默认</option>');
+  const opts = [`<option value="">${t('全部模型')}</option>`];
+  opts.push(`<option value="__global__">${t('全局默认')}</option>`);
   const seen = new Set();
   (state.providers || []).forEach(p => {
     (p.models || []).forEach(m => {
@@ -1740,7 +1792,7 @@ function renderModeFilterOptions() {
   const sel = $('novel-mode-filter');
   if (!sel) return;
   const cur = sel.value;
-  const opts = ['<option value="">全部</option>'];
+  const opts = [`<option value="">${t('全部')}</option>`];
   NOVEL_MODES.forEach(m => opts.push(`<option value="${m.value}">${m.label}</option>`));
   sel.innerHTML = opts.join('');
   sel.value = cur || '';
@@ -1779,7 +1831,7 @@ function novelCardHTML(n) {
   const hasOutline = n.chapters && n.chapters.length;
   const genCount = (n.chapters || []).filter(c => c.content).length;
   const isFinished = n.status === 'finished';
-  const created = n.created_at ? new Date(n.created_at * 1000).toLocaleString('zh-CN', { hour12: false }) : '';
+  const created = n.created_at ? fmtDateTime(n.created_at) : '';
   const meta = `${esc(n.genre || t('未设题材'))} · ${n.chapter_count}${t('章')} · ${n.words_per_chapter}${t('字/章')} · ${t('角色')}${(n.character_ids || []).length} · ${t('已生成')} ${genCount} ${t('章')} · ${t('模型')}${n.text_model_id ? esc(modelLabel(n.text_model_id)) : t('（全局）')}`;
   let primaryBtn;
   if (isDialog) {
@@ -1923,23 +1975,23 @@ function openFromLibrary(id) {
 // 已完结小说卡片
 function libraryCardHTML(n) {
   const genCount = (n.chapters || []).filter(c => c.content).length;
-  const created = n.created_at ? new Date(n.created_at * 1000).toLocaleString('zh-CN', { hour12: false }) : '';
+  const created = n.created_at ? fmtDateTime(n.created_at) : '';
   const summary = (n.summary || '').trim();
   return `
   <div class="card novel-card library-card">
     <div class="row">
       <span class="title">${esc(n.title)}</span>
-      <span class="badge">已完结</span>
+      <span class="badge">${t('已完结')}</span>
       <span class="badge">${modeLabel(n.mode)}</span>
       <span class="spacer"></span>
       ${created ? `<span class="meta">${esc(created)}</span>` : ''}
     </div>
-    <div class="meta">${esc(n.genre || '未设题材')} · ${genCount} 章 · ${(n.words_per_chapter || 0)}字/章 · 角色 ${(n.character_ids || []).length}</div>
+    <div class="meta">${esc(n.genre || t('未设题材'))} · ${genCount}${t('章')} · ${(n.words_per_chapter || 0)}${t('字/章')} · ${t('角色')} ${(n.character_ids || []).length}</div>
     ${summary ? `<div class="library-summary">${esc(summary.slice(0, 120))}${summary.length > 120 ? '…' : ''}</div>` : ''}
     <div class="row" style="margin-top:10px">
-      <button class="btn primary" onclick="openFromLibrary('${n.id}')">开始阅读</button>
-      <button class="btn" onclick="exportNovel('${n.id}', 'md')">导出 MD</button>
-      <button class="btn" onclick="exportNovel('${n.id}', 'epub')">导出 EPUB</button>
+      <button class="btn primary" onclick="openFromLibrary('${n.id}')">${t('开始阅读')}</button>
+      <button class="btn" onclick="exportNovel('${n.id}', 'md')">${t('导出 MD')}</button>
+      <button class="btn" onclick="exportNovel('${n.id}', 'epub')">${t('导出 EPUB')}</button>
     </div>
   </div>`;
 }
@@ -1958,7 +2010,7 @@ function renderLibrary() {
   const finished = (state.novels || []).filter(n => n.status === 'finished')
     .slice().sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
   if (!finished.length) {
-    box.innerHTML = '<div class="card meta">暂无已完结的小说。在「小说创作」中完成一部小说后，它会出现在这里。</div>';
+    box.innerHTML = `<div class="card meta">${t('暂无已完结的小说。在「小说创作」中完成一部小说后，它会出现在这里。')}</div>`;
     return;
   }
   box.innerHTML = finished.map(n => libraryCardHTML(n)).join('');
@@ -1971,25 +2023,25 @@ async function loadTrash() {
     const d = await api('/api/novels/trash');
     const list = d.novels || [];
     if (!list.length) {
-      box.innerHTML = '<div class="card meta">垃圾箱是空的。</div>';
+      box.innerHTML = `<div class="card meta">${t('垃圾箱是空的。')}</div>`;
       return;
     }
     box.innerHTML = list.map(n => {
       const isImprov = n.mode === 'improv';
-      const deletedAt = n.deleted_at ? new Date(n.deleted_at * 1000).toLocaleString('zh-CN', { hour12: false }) : '';
+      const deletedAt = n.deleted_at ? fmtDateTime(n.deleted_at) : '';
       return `
       <div class="card novel-card">
         <div class="row">
           <span class="title">${esc(n.title)}</span>
-          <span class="badge">${isImprov ? '即兴' : '大纲'}</span>
+          <span class="badge">${isImprov ? t('即兴') : t('大纲')}</span>
           <span class="spacer"></span>
-          ${deletedAt ? `<span class="meta">删除于 ${esc(deletedAt)}</span>` : ''}
+          ${deletedAt ? `<span class="meta">${t('删除于')} ${esc(deletedAt)}</span>` : ''}
         </div>
-        <div class="meta">${esc(n.genre || '未设题材')} · ${n.chapter_count}章 · 角色${(n.character_ids || []).length}</div>
+        <div class="meta">${esc(n.genre || t('未设题材'))} · ${n.chapter_count}${t('章')} · ${t('角色')}${(n.character_ids || []).length}</div>
         <div class="row" style="margin-top:10px">
-          <button class="btn" onclick="restoreNovel('${n.id}')">恢复</button>
+          <button class="btn" onclick="restoreNovel('${n.id}')">${t('恢复')}</button>
           <span class="spacer"></span>
-          <button class="btn danger" onclick="destroyNovel('${n.id}')">彻底删除</button>
+          <button class="btn danger" onclick="destroyNovel('${n.id}')">${t('彻底删除')}</button>
         </div>
       </div>`;
     }).join('');
@@ -2003,43 +2055,43 @@ function showTrash() {
 async function restoreNovel(id) {
   try {
     await api(`/api/novels/${id}/restore`, { method: 'POST' });
-    toast('已恢复', 'ok');
+    toast(t('已恢复'), 'ok');
     loadTrash();
   } catch (e) { toast(e.message, 'err'); }
 }
 
 async function destroyNovel(id) {
-  if (!confirm('彻底删除后不可恢复，确定删除该小说？')) return;
+  if (!confirm(t('彻底删除后不可恢复，确定删除该小说？'))) return;
   try {
     await api(`/api/novels/${id}/destroy`, { method: 'DELETE' });
-    toast('已彻底删除', 'ok');
+    toast(t('已彻底删除'), 'ok');
     loadTrash();
   } catch (e) { toast(e.message, 'err'); }
 }
 
 async function deleteNovel(id) {
-  if (!confirm('确定删除该小说？删除后将移入垃圾箱，可随时恢复。')) return;
+  if (!confirm(t('确定删除该小说？删除后将移入垃圾箱，可随时恢复。'))) return;
   try {
     await api('/api/novels/' + id, { method: 'DELETE' });
-    toast('已移入垃圾箱', 'ok');
+    toast(t('已移入垃圾箱'), 'ok');
     loadNovels();
   } catch (e) { toast(e.message, 'err'); }
 }
 
 async function finishNovel(id) {
-  if (!confirm('确定完结该小说？完结后不可再修改，如需修改可「重开」。')) return;
+  if (!confirm(t('确定完结该小说？完结后不可再修改，如需修改可「重开」。'))) return;
   try {
     await api(`/api/novels/${id}/finish`, { method: 'POST' });
-    toast('已完结', 'ok');
+    toast(t('已完结'), 'ok');
     loadNovels();
   } catch (e) { toast(e.message, 'err'); }
 }
 
 async function reopenNovel(id) {
-  if (!confirm('确定重开该小说？重开后恢复可编辑状态。')) return;
+  if (!confirm(t('确定重开该小说？重开后恢复可编辑状态。'))) return;
   try {
     await api(`/api/novels/${id}/reopen`, { method: 'POST' });
-    toast('已重开', 'ok');
+    toast(t('已重开'), 'ok');
     loadNovels();
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -2049,7 +2101,7 @@ function renderNovelModelSelect() {
   const opts = [];
   const global = state.settings.text_model_id || '';
   const globalName = global ? modelLabel(global) : '';
-  opts.push(`<option value="">跟随全局默认${globalName ? '（' + globalName + '）' : ''}</option>`);
+  opts.push(`<option value="">${t('跟随全局默认')}${globalName ? '（' + globalName + '）' : ''}</option>`);
   (state.providers || []).forEach(p => {
     (p.models || []).forEach(m => {
       if (m.type !== 'text') return;
@@ -2085,7 +2137,7 @@ function newNovel() {
   renderGenreSelect();
   renderNovelWorldbookSelect();
   state.wizardStep = 1;
-  $('editor-title').textContent = '新建小说';
+  $('editor-title').textContent = t('新建小说');
   renderSteps();
   window.scrollTo({ top: 0 });
 }
@@ -2143,9 +2195,9 @@ function renderSteps() {
   if (dotAnalyze) dotAnalyze.style.display = isContinue ? '' : 'none';
 
   const dot2 = $('step-dot-2');
-  if (dot2) dot2.textContent = isContinue ? '③ 角色设定' : '② 角色设定';
+  if (dot2) dot2.textContent = isContinue ? '③ ' + t('角色设定') : '② ' + t('角色设定');
   const dot3 = $('step-dot-3');
-  if (dot3) dot3.textContent = isContinue ? '④ 模型与提示词' : '③ 模型与提示词';
+  if (dot3) dot3.textContent = isContinue ? '④ ' + t('模型与提示词') : '③ ' + t('模型与提示词');
 
   // 面板显隐
   ['step-1', 'step-analyze', 'step-2', 'step-3'].forEach(id => {
@@ -2186,7 +2238,7 @@ function renderSteps() {
 
 async function saveNovelBasics() {
   const title = $('n-title').value.trim();
-  if (!title) { toast('请填写小说标题', 'err'); return false; }
+  if (!title) { toast(t('请填写小说标题'), 'err'); return false; }
   const body = {
     title,
     genre: $('n-genre').value.trim(),
@@ -2210,7 +2262,7 @@ async function saveNovelBasics() {
       const d = await api('/api/novels', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       state.novel = d.novel;
     }
-    toast('基本信息已保存', 'ok');
+    toast(t('基本信息已保存'), 'ok');
     // 新建时更新 URL 到具体 id（用 replaceState 避免触发 hashchange 导致步骤重置）
     if (window.location.hash.includes('/new')) {
       history.replaceState(null, '', '#/novels/' + state.novel.id + '/edit');
@@ -2228,7 +2280,7 @@ async function saveNovelBasicsAndNext() {
 
 // 只保存角色设定（不跳转），供步骤2的「保存角色设定」按钮使用
 async function saveNovelCharsOnly() {
-  if (!state.novel) return toast('请先保存基本信息', 'err');
+  if (!state.novel) return toast(t('请先保存基本信息'), 'err');
   const body = {
     character_ids: state.novel.character_ids || [],
     relationships: state.relations.filter(r => r.char1_id && r.char2_id && r.char1_id !== r.char2_id),
@@ -2238,14 +2290,14 @@ async function saveNovelCharsOnly() {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
     state.novel = d.novel;
-    toast('角色设定已保存', 'ok');
+    toast(t('角色设定已保存'), 'ok');
     loadNovels();
   } catch (e) { toast(e.message, 'err'); }
 }
 
 // 保存模型选择 + 全局前置提示词；goNext 为 true 时保存后跳转到生成页
 async function saveNovelModelAndPrompt(goNext = false) {
-  if (!state.novel) return toast('请先保存基本信息', 'err');
+  if (!state.novel) return toast(t('请先保存基本信息'), 'err');
   try {
     // 保存小说级模型选择
     const modelId = $('n-model').value || '';
@@ -2256,7 +2308,7 @@ async function saveNovelModelAndPrompt(goNext = false) {
     state.novel = d.novel;
     // 保存全局前置提示词
     await saveGlobalPrompt();
-    toast('模型与提示词已保存', 'ok');
+    toast(t('模型与提示词已保存'), 'ok');
     if (goNext) {
       // 根据创作模式跳转
       if (state.novel.mode === 'improv') {
@@ -2300,7 +2352,7 @@ async function openEditorPage(id) {
     $('n-mode').value = state.novel.mode || 'outline';
     onModeChange();
     state.relations = (state.novel.relationships || []).map(r => ({ ...r }));
-    $('editor-title').textContent = '编辑《' + (state.novel.title || '未命名') + '》';
+    $('editor-title').textContent = t('编辑《{t}》', { t: state.novel.title || t('未命名') });
     // 若已有大纲，更新"编辑设定"链接指向正确 id
     const editLink = $('gen-edit-link');
     if (editLink) editLink.setAttribute('href', '#/novels/' + id + '/edit');
@@ -2320,7 +2372,7 @@ async function openGeneratePage(id) {
     const d = await api('/api/novels/' + id);
     state.novel = d.novel;
     currentNovelId = id;
-    $('gen-title').textContent = '《' + (state.novel.title || '未命名') + '》 章节生成';
+    $('gen-title').textContent = `《${state.novel.title || t('未命名')}》 ${t('章节生成')}`;
     const editLink = $('gen-edit-link');
     if (editLink) editLink.setAttribute('href', '#/novels/' + id + '/edit');
     renderWorkspace();
@@ -2344,7 +2396,7 @@ async function openChapterPage(id, index) {
     currentNovelId = id;
     const chapters = state.novel.chapters || [];
     if (index < 1 || index > chapters.length) {
-      toast('章节序号越界', 'err');
+      toast(t('章节序号越界'), 'err');
       nav('#/novels/' + id + '/generate');
       return;
     }
@@ -2375,7 +2427,7 @@ async function openImprovPage(id) {
     const d = await api('/api/novels/' + id);
     state.novel = d.novel;
     currentNovelId = id;
-    $('improv-title').textContent = '《' + (state.novel.title || '未命名') + '》 即兴写作';
+    $('improv-title').textContent = `《${state.novel.title || t('未命名')}》 ${t('即兴写作')}`;
     const editLink = $('improv-edit-link');
     if (editLink) editLink.setAttribute('href', '#/novels/' + id + '/edit');
     renderImprov();
@@ -2394,13 +2446,13 @@ function renderImprov() {
   const nextIndex = (n.chapters || []).length + 1;
 
   const hint = $('improv-chapter-hint');
-  if (hint) hint.textContent = done.length ? `已写 ${done.length} 章，接下来写第 ${nextIndex} 章` : '接下来写第 1 章';
+  if (hint) hint.textContent = done.length ? t('已写 {n} 章，接下来写第 {m} 章', { n: done.length, m: nextIndex }) : t('接下来写第 {n} 章', { n: 1 });
 
   const readBtn = $('improv-read-btn');
   if (readBtn) readBtn.style.display = done.length ? '' : 'none';
 
   if (!done.length) {
-    body.innerHTML = '<div class="card meta">还没有章节。在上方输入本章写作指引，点击「生成本章」开始创作。</div>';
+    body.innerHTML = `<div class="card meta">${t('还没有章节。在上方输入本章写作指引，点击「生成本章」开始创作。')}</div>`;
     return;
   }
 
@@ -2415,22 +2467,22 @@ function renderImprov() {
     return `
     <div class="card improv-chapter-card">
       <div class="row">
-        <span class="title">第${c.index}章</span>
-        <input class="improv-title-input" id="improv-title-${c.index}" value="${esc(c.title || '')}" placeholder="第${c.index}章标题（可编辑）" onchange="saveImprovTitle(${c.index})">
-        <span class="meta">约 ${c.word_count || ''} 字</span>
+        <span class="title">${t('第 {n} 章', { n: c.index })}</span>
+        <input class="improv-title-input" id="improv-title-${c.index}" value="${esc(c.title || '')}" placeholder="${t('第 {n} 章标题（可编辑）', { n: c.index })}" onchange="saveImprovTitle(${c.index})">
+        <span class="meta">${t('约 {n} 字', { n: c.word_count || '' })}</span>
         <span class="spacer"></span>
-        <button class="btn" onclick="nav('#/novels/${n.id}/chapter/${c.index}')">查看/编辑正文</button>
+        <button class="btn" onclick="nav('#/novels/${n.id}/chapter/${c.index}')">${t('查看/编辑正文')}</button>
       </div>
-      ${c.instruction ? `<div class="improv-instruction-hint">📝 本章写作提示：${esc(c.instruction)}</div>` : ''}
+      ${c.instruction ? `<div class="improv-instruction-hint">📝 ${t('本章写作提示')}：${esc(c.instruction)}</div>` : ''}
       ${c.summary ? `<div class="improv-chapter-summary">${esc(c.summary)}</div>` : ''}
       <div class="improv-ref-row">
         <label class="improv-ref-item">
           <input type="checkbox" id="improv-ref-${c.index}" checked onchange="onImprovRefToggle(${c.index})">
-          <span>引用本章</span>
+          <span>${t('引用本章')}</span>
         </label>
         <select id="improv-ref-mode-${c.index}">
-          <option value="summary" ${defaultMode === 'summary' ? 'selected' : ''}>带入摘要</option>
-          <option value="full" ${defaultMode === 'full' ? 'selected' : ''}>带入完整内容</option>
+          <option value="summary" ${defaultMode === 'summary' ? 'selected' : ''}>${t('带入摘要')}</option>
+          <option value="full" ${defaultMode === 'full' ? 'selected' : ''}>${t('带入完整内容')}</option>
         </select>
       </div>
     </div>`;
@@ -2438,7 +2490,7 @@ function renderImprov() {
 
   // 更新排序按钮文案
   const sortBtn = $('improv-sort-btn');
-  if (sortBtn) sortBtn.textContent = improvSortDesc ? '排序：最新在前' : '排序：最早在前';
+  if (sortBtn) sortBtn.textContent = improvSortDesc ? t('排序：最新在前') : t('排序：最早在前');
 }
 
 // 切换章节排序（正序/倒序）
@@ -2465,7 +2517,7 @@ async function saveImprovTitle(index) {
       body: JSON.stringify({ title }),
     });
     state.novel = d.novel;
-    toast('标题已保存', 'ok');
+    toast(t('标题已保存'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -2473,7 +2525,7 @@ async function saveImprovTitle(index) {
 async function generateImprovChapter() {
   if (improvGenerating) return;
   const instruction = $('improv-instruction').value.trim();
-  if (!instruction) return toast('请填写本章写作指引', 'err');
+  if (!instruction) return toast(t('请填写本章写作指引'), 'err');
 
   // 收集用户勾选的引用章节
   const contextChapters = [];
@@ -2488,7 +2540,7 @@ async function generateImprovChapter() {
   improvGenerating = true;
   const btn = $('improv-gen-btn');
   btn.disabled = true;
-  btn.textContent = '生成中…';
+  btn.textContent = t('生成中…');
   $('improv-instruction').disabled = true;
 
   // 在正文顶部插入生成面板
@@ -2497,8 +2549,8 @@ async function generateImprovChapter() {
   body.insertAdjacentHTML('afterbegin', `
     <div class="card gen-panel" id="${panelId}">
       <div class="row">
-        <span class="title">新章节生成中</span>
-        <span class="badge gen-badge" id="${panelId}-badge">生成中…</span>
+        <span class="title">${t('新章节生成中')}</span>
+        <span class="badge gen-badge" id="${panelId}-badge">${t('生成中…')}</span>
         <span class="spacer"></span>
         <span class="meta" id="${panelId}-words"></span>
       </div>
@@ -2512,19 +2564,19 @@ async function generateImprovChapter() {
   let wordCount = 0;
   let received = false;
   const waitTimer = setTimeout(() => {
-    if (!received && badge) badge.textContent = '模型思考中…';
+    if (!received && badge) badge.textContent = t('模型思考中…');
   }, 9000);
 
   try {
     await streamApi(`/api/novels/${state.novel.id}/improv/stream`, (ev) => {
       if (ev.type === 'delta') {
-        if (!received) { received = true; clearTimeout(waitTimer); if (badge) badge.textContent = '生成中…'; }
+        if (!received) { received = true; clearTimeout(waitTimer); if (badge) badge.textContent = t('生成中…'); }
         full += ev.content;
         if (out) { out.textContent = full; out.scrollTop = out.scrollHeight; }
       } else if (ev.type === 'chapter_done') {
         wordCount = ev.word_count || 0;
-        if (wordsEl) wordsEl.textContent = `约 ${wordCount} 字`;
-        if (badge) badge.textContent = '正文完成，生成摘要…';
+        if (wordsEl) wordsEl.textContent = t('约 {n} 字', { n: wordCount });
+        if (badge) badge.textContent = t('正文完成，生成摘要…');
       } else if (ev.type === 'done') {
         state.novel = ev.novel;
       } else if (ev.type === 'error') {
@@ -2539,12 +2591,12 @@ async function generateImprovChapter() {
     clearTimeout(waitTimer);
     improvGenerating = false;
     btn.disabled = false;
-    btn.textContent = '生成本章';
+    btn.textContent = t('生成本章');
     $('improv-instruction').disabled = false;
   }
 
   if (!received) {
-    toast('模型未返回内容，请重试', 'err');
+    toast(t('模型未返回内容，请重试'), 'err');
     $(panelId).remove();
     return;
   }
@@ -2552,7 +2604,7 @@ async function generateImprovChapter() {
   $(panelId).remove();
   $('improv-instruction').value = '';
   renderImprov();
-  toast('本章完成', 'ok');
+  toast(t('本章完成'), 'ok');
 }
 
 // ============ 对话模式（IM 聊天式推进剧情） ============
@@ -2563,7 +2615,7 @@ async function openDialogPage(id) {
     const d = await api('/api/novels/' + id);
     state.novel = d.novel;
     currentNovelId = id;
-    $('dialog-title').textContent = '《' + (state.novel.title || '未命名') + '》 对话创作';
+    $('dialog-title').textContent = `《${state.novel.title || t('未命名')}》 ${t('对话创作')}`;
     const editLink = $('dialog-edit-link');
     if (editLink) editLink.setAttribute('href', '#/novels/' + id + '/edit');
     renderDialog();
@@ -2587,23 +2639,23 @@ function renderDialogChapters() {
   wrap.style.display = 'block';
   box.innerHTML = chs.map(ch => `
     <div class="dialog-chapter-item">
-      <span class="dialog-chapter-idx">第${ch.index}章</span>
+      <span class="dialog-chapter-idx">${t('第 {n} 章', { n: ch.index })}</span>
       <span class="dialog-chapter-name">${esc(ch.title || '')}</span>
-      <span class="meta">${ch.word_count || 0} 字</span>
+      <span class="meta">${t('{n} 字', { n: ch.word_count || 0 })}</span>
       <span class="spacer"></span>
-      <button class="dialog-act-btn" onclick="nav('#/novels/${state.novel.id}/chapter/${ch.index}')">查看/编辑</button>
-      <button class="dialog-act-btn danger" onclick="deleteDialogChapter(${ch.index})">删除</button>
+      <button class="dialog-act-btn" onclick="nav('#/novels/${state.novel.id}/chapter/${ch.index}')">${t('查看/编辑')}</button>
+      <button class="dialog-act-btn danger" onclick="deleteDialogChapter(${ch.index})">${t('删除')}</button>
     </div>`).join('');
 }
 
 // 删除对话模式生成的章节
 async function deleteDialogChapter(index) {
-  if (!confirm(`确定删除第 ${index} 章？此操作不可恢复。`)) return;
+  if (!confirm(t('确定删除第 {n} 章？此操作不可恢复。', { n: index }))) return;
   try {
     const d = await api(`/api/novels/${state.novel.id}/chapter/${index}`, { method: 'DELETE' });
     state.novel = d.novel;
     renderDialogChapters();
-    toast('章节已删除', 'ok');
+    toast(t('章节已删除'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -2618,8 +2670,8 @@ function renderDialog() {
     chat.innerHTML = `
       <div class="dialog-empty">
         <div class="dialog-empty-icon">💬</div>
-        <div class="dialog-empty-title">开始对话式创作</div>
-        <div class="dialog-empty-hint">在下方输入一句话，告诉 AI 剧情走向（例如场景、人物动作、冲突），AI 会以一段不超过 500 字的正文回应，像聊天一样推进故事。</div>
+        <div class="dialog-empty-title">${t('开始对话式创作')}</div>
+        <div class="dialog-empty-hint">${t('在下方输入一句话，告诉 AI 剧情走向（例如场景、人物动作、冲突），AI 会以一段不超过 500 字的正文回应，像聊天一样推进故事。')}</div>
       </div>`;
     return;
   }
@@ -2628,13 +2680,13 @@ function renderDialog() {
     // 每条消息的操作按钮：编辑 + （AI 消息）生成章节 + 删除（删除该消息及之后所有消息）
     const actions = `
       <div class="dialog-msg-actions">
-        <button class="dialog-act-btn" onclick="editDialogMessage(${idx})">编辑</button>
-        ${!isUser ? `<button class="dialog-act-btn" onclick="dialogToChapter(${idx})">生成章节</button>` : ''}
-        <button class="dialog-act-btn danger" onclick="deleteDialogMessage(${idx})">删除</button>
+        <button class="dialog-act-btn" onclick="editDialogMessage(${idx})">${t('编辑')}</button>
+        ${!isUser ? `<button class="dialog-act-btn" onclick="dialogToChapter(${idx})">${t('生成章节')}</button>` : ''}
+        <button class="dialog-act-btn danger" onclick="deleteDialogMessage(${idx})">${t('删除')}</button>
       </div>`;
     return `
       <div class="dialog-msg ${isUser ? 'dialog-msg-user' : 'dialog-msg-ai'}" data-idx="${idx}">
-        <div class="dialog-avatar">${isUser ? '我' : 'AI'}</div>
+        <div class="dialog-avatar">${isUser ? t('我') : 'AI'}</div>
         <div class="dialog-bubble-wrap">
           <div class="dialog-bubble" id="dialog-bubble-${idx}">${esc(m.content)}</div>
           ${actions}
@@ -2658,11 +2710,11 @@ function editDialogMessage(idx) {
   wrap.innerHTML = `
     <textarea class="dialog-edit-textarea" id="dialog-edit-${idx}">${esc(m.content)}</textarea>
     <div class="dialog-msg-actions">
-      <button class="dialog-act-btn primary" onclick="saveDialogEdit(${idx})">${isUser ? '保存并重新生成' : '保存修改'}</button>
-      <button class="dialog-act-btn" onclick="renderDialog()">取消</button>
+      <button class="dialog-act-btn primary" onclick="saveDialogEdit(${idx})">${isUser ? t('保存并重新生成') : t('保存修改')}</button>
+      <button class="dialog-act-btn" onclick="renderDialog()">${t('取消')}</button>
     </div>
-    ${isUser ? '<div class="dialog-edit-hint">保存后将截断此消息之后的对话，并重新生成 AI 回复。</div>'
-             : '<div class="dialog-edit-hint">仅修改这段 AI 返回的内容，不会重新调用 AI。</div>'}
+    ${isUser ? `<div class="dialog-edit-hint">${t('保存后将截断此消息之后的对话，并重新生成 AI 回复。')}</div>`
+             : `<div class="dialog-edit-hint">${t('仅修改这段 AI 返回的内容，不会重新调用 AI。')}</div>`}
   `;
   const ta = $('dialog-edit-' + idx);
   if (ta) {
@@ -2686,7 +2738,7 @@ async function deleteDialogMessage(idx) {
   const msgs = (state.novel && state.novel.dialog_messages) || [];
   if (idx < 0 || idx >= msgs.length) return;
   const count = msgs.length - idx;  // 从 idx 到末尾的消息数
-  if (!confirm(`删除这条消息及其之后的 ${count} 条消息？`)) return;
+  if (!confirm(t('删除这条消息及其之后的 {n} 条消息？', { n: count }))) return;
   // 自动选择 idx 及之后的所有消息索引
   const indexes = [];
   for (let i = idx; i < msgs.length; i++) indexes.push(i);
@@ -2697,7 +2749,7 @@ async function deleteDialogMessage(idx) {
     });
     state.novel = d.novel;
     renderDialog();
-    toast(`已删除 ${count} 条消息`, 'ok');
+    toast(t('已删除 {n} 条消息', { n: count }), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -2709,7 +2761,7 @@ async function saveDialogEdit(idx) {
   const ta = $('dialog-edit-' + idx);
   if (!ta) return;
   const newText = ta.value.trim();
-  if (!newText) return toast('内容不能为空', 'err');
+  if (!newText) return toast(t('内容不能为空'), 'err');
 
   const msgs = (state.novel && state.novel.dialog_messages) || [];
   const m = msgs[idx];
@@ -2725,7 +2777,7 @@ async function saveDialogEdit(idx) {
       });
       state.novel = d.novel;
       renderDialog();
-      toast('内容已更新', 'ok');
+      toast(t('内容已更新'), 'ok');
     } catch (e) { toast(e.message, 'err'); }
     return;
   }
@@ -2737,7 +2789,7 @@ async function saveDialogEdit(idx) {
   dialogSending = true;
   const btn = $('dialog-send-btn');
   btn.disabled = true;
-  btn.textContent = '重新生成中…';
+  btn.textContent = t('重新生成中…');
 
   const chat = $('dialog-chat');
   // 移除该消息及其之后的所有消息
@@ -2748,7 +2800,7 @@ async function saveDialogEdit(idx) {
   // 追加显示用户消息（编辑后的内容）
   chat.insertAdjacentHTML('beforeend', `
     <div class="dialog-msg dialog-msg-user">
-      <div class="dialog-avatar">我</div>
+      <div class="dialog-avatar">${t('我')}</div>
       <div class="dialog-bubble-wrap"><div class="dialog-bubble">${esc(newText)}</div></div>
     </div>`);
 
@@ -2757,7 +2809,7 @@ async function saveDialogEdit(idx) {
   chat.insertAdjacentHTML('beforeend', `
     <div class="dialog-msg dialog-msg-ai" id="${aiId}">
       <div class="dialog-avatar">AI</div>
-      <div class="dialog-bubble-wrap"><div class="dialog-bubble" id="${aiId}-bubble"><span class="dialog-typing">正在思考…</span></div></div>
+      <div class="dialog-bubble-wrap"><div class="dialog-bubble" id="${aiId}-bubble"><span class="dialog-typing">${t('正在思考…')}</span></div></div>
     </div>`);
   const bubble = $(aiId + '-bubble');
   chat.scrollTop = chat.scrollHeight;
@@ -2777,36 +2829,36 @@ async function saveDialogEdit(idx) {
       }
     }, body);
 
-    if (!full.trim()) throw new Error('模型未返回内容，请重试');
+    if (!full.trim()) throw new Error(t('模型未返回内容，请重试'));
     // 更新本地 state：前缀 + 新 user + 新 AI
     state.novel.dialog_messages = prefix.concat([
       { role: 'user', content: newText },
       { role: 'assistant', content: full.trim() },
     ]);
     renderDialog();
-    toast('已重新生成', 'ok');
+    toast(t('已重新生成'), 'ok');
   } catch (e) {
     if (bubble) { bubble.textContent = '⚠️ ' + e.message; bubble.classList.add('dialog-error'); }
     toast(e.message, 'err');
   } finally {
     dialogSending = false;
     btn.disabled = false;
-    btn.textContent = '发送';
+    btn.textContent = t('发送');
   }
 }
 
 // 在某次 AI 消息后输出章节（直接合并之前的 AI 输出，不重新生成正文，仅提取摘要）
 async function dialogToChapter(idx) {
   if (dialogSending) return;
-  if (!confirm('将把到目前为止的 AI 输出（含本条）直接合并成一个章节，确定继续？')) return;
+  if (!confirm(t('将把到目前为止的 AI 输出（含本条）直接合并成一个章节，确定继续？'))) return;
 
   const msgs = (state.novel && state.novel.dialog_messages) || [];
-  if (idx < 0 || idx >= msgs.length) return toast('消息索引无效', 'err');
+  if (idx < 0 || idx >= msgs.length) return toast(t('消息索引无效'), 'err');
 
   dialogSending = true;
   const btn = $('dialog-send-btn');
   btn.disabled = true;
-  btn.textContent = '生成中…';
+  btn.textContent = t('生成中…');
 
   const chat = $('dialog-chat');
   // 插入章节生成面板
@@ -2814,8 +2866,8 @@ async function dialogToChapter(idx) {
   chat.insertAdjacentHTML('beforeend', `
     <div class="dialog-chapter-panel" id="${panelId}">
       <div class="row">
-        <span class="title">正在合并并提取摘要…</span>
-        <span class="badge gen-badge">生成中…</span>
+        <span class="title">${t('正在合并并提取摘要…')}</span>
+        <span class="badge gen-badge">${t('生成中…')}</span>
       </div>
       <div class="gen-output" id="${panelId}-out"></div>
     </div>`);
@@ -2840,10 +2892,10 @@ async function dialogToChapter(idx) {
     // 重新渲染：对话区（已合并消息消失）+ 章节列表
     renderDialog();
     loadNovels();
-    toast(`第 ${chapterIndex} 章已生成（${d.word_count} 字）`, 'ok');
+    toast(t('第 {n} 章已生成（{m} 字）', { n: chapterIndex, m: d.word_count }), 'ok');
     if (out) {
       const titleEl = panelId && document.querySelector(`#${panelId} .title`);
-      if (titleEl) titleEl.textContent = `第 ${chapterIndex} 章 · ${d.title || ''}（${d.word_count} 字）`;
+      if (titleEl) titleEl.textContent = t('第 {n} 章', { n: chapterIndex }) + ' · ' + (d.title || '') + t('（{n} 字）', { n: d.word_count });
     }
   } catch (e) {
     if (out) { out.textContent = '⚠️ ' + e.message; out.classList.add('gen-error'); }
@@ -2851,7 +2903,7 @@ async function dialogToChapter(idx) {
   } finally {
     dialogSending = false;
     btn.disabled = false;
-    btn.textContent = '发送';
+    btn.textContent = t('发送');
   }
 }
 
@@ -2860,13 +2912,13 @@ async function sendDialogMessage() {
   if (dialogSending) return;
   const input = $('dialog-input');
   const text = input.value.trim();
-  if (!text) return toast('请先输入内容', 'err');
+  if (!text) return toast(t('请先输入内容'), 'err');
   // 字数由作者在指令中指定（如「写300字」），后端会自动提取，未指定则默认 500 字
 
   dialogSending = true;
   const btn = $('dialog-send-btn');
   btn.disabled = true;
-  btn.textContent = '回复中…';
+  btn.textContent = t('回复中…');
   input.disabled = true;
 
   // 立即在聊天区显示用户消息
@@ -2875,7 +2927,7 @@ async function sendDialogMessage() {
   if (emptyEl) emptyEl.remove();
   chat.insertAdjacentHTML('beforeend', `
     <div class="dialog-msg dialog-msg-user">
-      <div class="dialog-avatar">我</div>
+      <div class="dialog-avatar">${t('我')}</div>
       <div class="dialog-bubble-wrap"><div class="dialog-bubble">${esc(text)}</div></div>
     </div>`);
 
@@ -2884,7 +2936,7 @@ async function sendDialogMessage() {
   chat.insertAdjacentHTML('beforeend', `
     <div class="dialog-msg dialog-msg-ai" id="${aiId}">
       <div class="dialog-avatar">AI</div>
-      <div class="dialog-bubble-wrap"><div class="dialog-bubble" id="${aiId}-bubble"><span class="dialog-typing">正在思考…</span></div></div>
+      <div class="dialog-bubble-wrap"><div class="dialog-bubble" id="${aiId}-bubble"><span class="dialog-typing">${t('正在思考…')}</span></div></div>
     </div>`);
   const bubble = $(aiId + '-bubble');
   chat.scrollTop = chat.scrollHeight;
@@ -2904,7 +2956,7 @@ async function sendDialogMessage() {
       }
     }, body);
 
-    if (!full.trim()) throw new Error('模型未返回内容，请重试');
+    if (!full.trim()) throw new Error(t('模型未返回内容，请重试'));
     // 更新 state 中的对话历史（供下次渲染）
     const msgs = (state.novel.dialog_messages || []);
     state.novel.dialog_messages = msgs.concat([
@@ -2920,7 +2972,7 @@ async function sendDialogMessage() {
   } finally {
     dialogSending = false;
     btn.disabled = false;
-    btn.textContent = '发送';
+    btn.textContent = t('发送');
     input.disabled = false;
     input.focus();
     chat.scrollTop = chat.scrollHeight;
@@ -2963,7 +3015,7 @@ function renderReader() {
   const toc = $('reader-toc');
   const done = (n.chapters || []).filter(c => c.content);
   if (!done.length) {
-    body.innerHTML = '<div class="card meta">暂无已生成章节，无法进入阅读模式。</div>';
+    body.innerHTML = `<div class="card meta">${t('暂无已生成章节，无法进入阅读模式。')}</div>`;
     if (toc) toc.innerHTML = '';
     return;
   }
@@ -2974,7 +3026,7 @@ function renderReader() {
 
   html += done.map(c => `
     <div class="reader-chapter" id="reader-ch-${c.index}">
-      <h2 class="reader-ch-title">第${c.index}章 ${esc(c.title || '')}</h2>
+      <h2 class="reader-ch-title">${t('第 {n} 章', { n: c.index })} ${esc(c.title || '')}</h2>
       <div class="reader-ch-content">${highlightCharacterNames(c.content)}</div>
     </div>`).join('');
 
@@ -2982,8 +3034,8 @@ function renderReader() {
 
   // 渲染左侧目录（用 onclick + scrollIntoView，避免改 hash 触发路由）
   if (toc) {
-    toc.innerHTML = `<div class="reader-toc-title">目录</div>` + done.map(c =>
-      `<div class="reader-toc-item" data-index="${c.index}" onclick="scrollToReaderChapter(${c.index})">第${c.index}章 ${esc(c.title || '')}</div>`
+    toc.innerHTML = `<div class="reader-toc-title">${t('目录')}</div>` + done.map(c =>
+      `<div class="reader-toc-item" data-index="${c.index}" onclick="scrollToReaderChapter(${c.index})">${t('第 {n} 章', { n: c.index })} ${esc(c.title || '')}</div>`
     ).join('');
   }
   applyReaderFont();
@@ -3061,7 +3113,7 @@ function renderChapterPage(index) {
   const chapter = chapters.find(c => c.index === index);
   if (!chapter) return;
 
-  $('chapter-title').textContent = `《${n.title}》 第 ${index} 章`;
+  $('chapter-title').textContent = `《${n.title}》 ${t('第 {n} 章', { n: index })}`;
   const body = $('chapter-body');
   const editing = chapterEditing === index;  // 当前是否在编辑本章
   const isFinished = n.status === 'finished';
@@ -3073,48 +3125,48 @@ function renderChapterPage(index) {
   const prevIdx = index > 1 ? index - 1 : null;
   const nextIdx = index < chapters.length ? index + 1 : null;
   html += `<div class="row" style="margin:12px 0">
-    ${prevIdx ? `<button class="btn" onclick="nav('#/novels/${n.id}/chapter/${prevIdx}')">← 第 ${prevIdx} 章</button>` : ''}
+    ${prevIdx ? `<button class="btn" onclick="nav('#/novels/${n.id}/chapter/${prevIdx}')">← ${t('第 {n} 章', { n: prevIdx })}</button>` : ''}
     <span class="spacer"></span>
-    ${nextIdx ? `<button class="btn" onclick="nav('#/novels/${n.id}/chapter/${nextIdx}')">第 ${nextIdx} 章 →</button>` : ''}
+    ${nextIdx ? `<button class="btn" onclick="nav('#/novels/${n.id}/chapter/${nextIdx}')">${t('第 {n} 章', { n: nextIdx })} →</button>` : ''}
   </div>`;
 
   // 操作按钮
   if (isFinished) {
     // 已完结：只读，不显示任何编辑/生成/删除按钮
     html += `<div style="margin:8px 0 16px">
-      <span class="meta">该小说已完结，内容为只读。如需修改请回到列表「重开」。</span>
+      <span class="meta">${t('该小说已完结，内容为只读。如需修改请回到列表「重开」。')}</span>
     </div>`;
   } else if (editing) {
     html += `<div style="margin:8px 0 16px">
-      <button class="btn primary" onclick="saveChapterEdit(${index})">保存修改</button>
-      <button class="btn" onclick="cancelChapterEdit(${index})">取消</button>
+      <button class="btn primary" onclick="saveChapterEdit(${index})">${t('保存修改')}</button>
+      <button class="btn" onclick="cancelChapterEdit(${index})">${t('取消')}</button>
       <span class="spacer"></span>
-      <button class="btn" id="polish-frag-btn" onclick="polishFragment(${index})">✨ 润色选中片段</button>
-      <button class="btn" id="expand-frag-btn" onclick="expandFragment(${index})">📝 扩写选中片段</button>
+      <button class="btn" id="polish-frag-btn" onclick="polishFragment(${index})">✨ ${t('润色选中片段')}</button>
+      <button class="btn" id="expand-frag-btn" onclick="expandFragment(${index})">📝 ${t('扩写选中片段')}</button>
     </div>
     <div id="frag-panel" style="display:none; margin:8px 0 16px"></div>`;
   } else {
     // 即兴模式：提供写作指引输入框，预填上一次的指引，作者可继续使用或修改后重新生成
     if (n.mode === 'improv') {
       html += `<div class="improv-regen-guide">
-        <div class="improv-regen-label">本章写作指引（修改后重新生成本章）</div>
-        <textarea id="chapter-instruction" rows="3" placeholder="告诉 AI 这一章想写什么（情节方向、冲突、转折等）">${esc(chapter.instruction || '')}</textarea>
+        <div class="improv-regen-label">${t('本章写作指引（修改后重新生成本章）')}</div>
+        <textarea id="chapter-instruction" rows="3" placeholder="${t('告诉 AI 这一章想写什么（情节方向、冲突、转折等）')}">${esc(chapter.instruction || '')}</textarea>
       </div>`;
     }
     html += `<div style="margin:8px 0 16px">
-      <button class="btn primary" id="chapter-gen-btn" onclick="generateChapterInPage(${index})">${chapter.content ? '重新生成本章' : '生成本章'}</button>
-      ${chapter.content ? `<button class="btn" onclick="startChapterEdit(${index})">编辑本章</button>` : ''}
-      ${chapter.content ? `<button class="btn" onclick="summarizeChapter(${index})">生成摘要</button>` : ''}
-      ${chapter.content ? `<button class="btn" onclick="exportChapter(${index})">导出本章</button>` : ''}
+      <button class="btn primary" id="chapter-gen-btn" onclick="generateChapterInPage(${index})">${chapter.content ? t('重新生成本章') : t('生成本章')}</button>
+      ${chapter.content ? `<button class="btn" onclick="startChapterEdit(${index})">${t('编辑本章')}</button>` : ''}
+      ${chapter.content ? `<button class="btn" onclick="summarizeChapter(${index})">${t('生成摘要')}</button>` : ''}
+      ${chapter.content ? `<button class="btn" onclick="exportChapter(${index})">${t('导出本章')}</button>` : ''}
       <span class="spacer"></span>
-      <button class="btn danger" onclick="deleteChapter(${index})">删除本章</button>
+      <button class="btn danger" onclick="deleteChapter(${index})">${t('删除本章')}</button>
     </div>`;
   }
 
   // 历史版本按钮（仅当章节有内容时显示）
   if (!isFinished && chapter.content) {
     html += `<div style="margin:8px 0 16px">
-      <button class="btn" onclick="toggleChapterHistory(${index})">📜 历史版本</button>
+      <button class="btn" onclick="toggleChapterHistory(${index})">📜 ${t('历史版本')}</button>
     </div>`;
   }
   html += `<div id="chapter-history-panel" style="display:none; margin:8px 0 16px"></div>`;
@@ -3126,20 +3178,20 @@ function renderChapterPage(index) {
   if (editing) {
     html += `
       <div class="chapter-edit-form">
-        <label>章节标题
-          <input id="ce-title" value="${esc(chapter.title || '')}" placeholder="章节标题">
+        <label>${t('章节标题')}
+          <input id="ce-title" value="${esc(chapter.title || '')}" placeholder="${t('章节标题')}">
         </label>
-        <label>章节概要
-          <input id="ce-summary" value="${esc(chapter.summary || '')}" placeholder="一句话概要">
+        <label>${t('章节概要')}
+          <input id="ce-summary" value="${esc(chapter.summary || '')}" placeholder="${t('一句话概要')}">
         </label>
-        <label>正文内容
+        <label>${t('正文内容')}
           <textarea id="ce-content" rows="20" class="chapter-edit-content">${esc(chapter.content || '')}</textarea>
         </label>
       </div>`;
   } else if (chapter.content) {
     html += `<div class="chapter-content full-chapter-content">${highlightCharacterNames(chapter.content)}</div>`;
   } else {
-    html += `<div class="card meta">本章尚未生成，点击上方「生成本章」开始。</div>`;
+    html += `<div class="card meta">${t('本章尚未生成，点击上方「生成本章」开始。')}</div>`;
   }
 
   body.innerHTML = html;
@@ -3171,7 +3223,7 @@ async function saveChapterEdit(index) {
     chapterEditing = null;
     renderChapterPage(index);
     loadNovels();
-    toast('章节已保存', 'ok');
+    toast(t('章节已保存'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -3179,15 +3231,15 @@ async function saveChapterEdit(index) {
 // 获取编辑正文文本框中选中的文字；未选中时给出提示
 function getSelectedFragment() {
   const ta = $('ce-content');
-  if (!ta) { toast('请先进入编辑模式', 'err'); return null; }
+  if (!ta) { toast(t('请先进入编辑模式'), 'err'); return null; }
   const start = ta.selectionStart, end = ta.selectionEnd;
   if (start === end) {
-    toast('请先在正文中选中要处理的文字片段', 'err');
+    toast(t('请先在正文中选中要处理的文字片段'), 'err');
     return null;
   }
   const text = ta.value.substring(start, end).trim();
-  if (!text) { toast('选中内容为空，请重新选择', 'err'); return null; }
-  if (text.length < 10) { toast('片段过短（至少 10 字），请选中更完整的文字', 'err'); return null; }
+  if (!text) { toast(t('选中内容为空，请重新选择'), 'err'); return null; }
+  if (text.length < 10) { toast(t('片段过短（至少 10 字），请选中更完整的文字'), 'err'); return null; }
   return { text, start, end, ta };
 }
 
@@ -3198,20 +3250,20 @@ async function runFragmentAction(index, action) {
   const { text, start, end, ta } = sel;
   const panel = $('frag-panel');
   const btn = $(action === 'polish' ? 'polish-frag-btn' : 'expand-frag-btn');
-  const label = action === 'polish' ? '润色' : '扩写';
+  const label = action === 'polish' ? t('润色') : t('扩写');
   if (!panel) return;
 
   panel.style.display = 'block';
   panel.innerHTML = `
     <div class="card gen-panel">
       <div class="row">
-        <span class="title">片段${label}中</span>
-        <span class="badge gen-badge" id="frag-badge">生成中…</span>
+        <span class="title">${t('片段{label}中', { label })}</span>
+        <span class="badge gen-badge" id="frag-badge">${t('生成中…')}</span>
       </div>
       <div class="gen-output" id="frag-out"></div>
       <div class="row" style="margin-top:10px">
-        <button class="btn primary" id="frag-apply-btn" disabled onclick="applyFragment(${index}, ${start}, ${end})">替换到正文</button>
-        <button class="btn" onclick="cancelFragment()">取消</button>
+        <button class="btn primary" id="frag-apply-btn" disabled onclick="applyFragment(${index}, ${start}, ${end})">${t('替换到正文')}</button>
+        <button class="btn" onclick="cancelFragment()">${t('取消')}</button>
       </div>
     </div>`;
   const out = $('frag-out'), badge = $('frag-badge');
@@ -3227,17 +3279,17 @@ async function runFragmentAction(index, action) {
         throw new Error(ev.message);
       }
     }, { text });
-    if (!full.trim()) { throw new Error('模型未返回内容，请重试'); }
-    if (badge) badge.textContent = '完成';
+    if (!full.trim()) { throw new Error(t('模型未返回内容，请重试')); }
+    if (badge) badge.textContent = t('完成');
     // 暂存结果，供「替换到正文」使用
     panel._fragmentResult = full.trim();
     panel._fragmentRange = { start, end };
     const applyBtn = $('frag-apply-btn');
-    if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = '替换到正文（覆盖选中文字）'; }
-    toast(`${label}完成，点击「替换到正文」生效`, 'ok');
+    if (applyBtn) { applyBtn.disabled = false; applyBtn.textContent = t('替换到正文（覆盖选中文字）'); }
+    toast(t('{label}完成，点击「替换到正文」生效', { label }), 'ok');
   } catch (e) {
     if (out) { out.textContent = '⚠️ ' + e.message; out.classList.add('gen-error'); }
-    if (badge) badge.textContent = '失败';
+    if (badge) badge.textContent = t('失败');
     toast(e.message, 'err');
   } finally {
     if (btn) btn.disabled = false;
@@ -3261,7 +3313,7 @@ function applyFragment(index, start, end) {
   ta.value = ta.value.substring(0, s) + panel._fragmentResult + ta.value.substring(e);
   panel.style.display = 'none';
   panel._fragmentResult = null;
-  toast('已替换到正文，记得点「保存修改」', 'ok');
+  toast(t('已替换到正文，记得点「保存修改」'), 'ok');
 }
 
 function cancelFragment() {
@@ -3280,21 +3332,21 @@ async function generateChapterInPage(index) {
     const guideEl = $('chapter-instruction');
     instruction = guideEl ? guideEl.value.trim() : '';
     if (!instruction) {
-      toast('请填写本章写作指引', 'err');
+      toast(t('请填写本章写作指引'), 'err');
       if (guideEl) guideEl.focus();
       return;
     }
   }
   btn.disabled = true;
-  btn.textContent = '生成中…';
+  btn.textContent = t('生成中…');
   const guideEl = $('chapter-instruction');
   if (guideEl) guideEl.disabled = true;
   panel.style.display = 'block';
   panel.innerHTML = `
     <div class="card gen-panel">
       <div class="row">
-        <span class="title">第 ${index} 章 生成中</span>
-        <span class="badge gen-badge" id="cp-badge">生成中…</span>
+        <span class="title">${t('第 {n} 章 生成中', { n: index })}</span>
+        <span class="badge gen-badge" id="cp-badge">${t('生成中…')}</span>
         <span class="spacer"></span>
         <span class="meta" id="cp-words"></span>
       </div>
@@ -3309,20 +3361,20 @@ async function generateChapterInPage(index) {
     }
     panel.style.display = 'none';
     btn.disabled = false;
-    btn.textContent = '重新生成本章';
+    btn.textContent = t('重新生成本章');
     if (guideEl) guideEl.disabled = false;
     renderChapterPage(index);
     loadNovels();
-    toast(`第 ${index} 章完成`, 'ok');
+    toast(t('第 {n} 章完成', { n: index }), 'ok');
   } catch (e) {
     btn.disabled = false;
-    btn.textContent = '重试';
+    btn.textContent = t('重试');
     if (guideEl) guideEl.disabled = false;
     if (out) {
       out.textContent = '⚠️ ' + e.message;
       out.classList.add('gen-error');
     }
-    if (badge) badge.textContent = '生成失败';
+    if (badge) badge.textContent = t('生成失败');
     toast(e.message, 'err');
   }
 }
@@ -3331,21 +3383,21 @@ async function generateChapterInPage(index) {
 function exportChapter(index) {
   const n = state.novel;
   const c = (n.chapters || []).find(x => x.index === index);
-  if (!c || !c.content) { toast('本章暂无内容', 'err'); return; }
+  if (!c || !c.content) { toast(t('本章暂无内容'), 'err'); return; }
   const text = `# ${n.title} 第${index}章 ${c.title || ''}\n\n${c.content}\n`;
-  downloadText(`${n.title}-第${index}章.md`, text);
-  toast('已导出本章', 'ok');
+  downloadText(`${n.title}-${t('第 {n} 章', { n: index })}.md`, text);
+  toast(t('已导出本章'), 'ok');
 }
 
 // 为单章生成摘要
 async function summarizeChapter(index) {
   const n = state.novel;
   if (!n) return;
-  showLoading('正在生成本章摘要…', 'AI 正在概括本章核心情节，请稍候');
+  showLoading(t('正在生成本章摘要…'), t('AI 正在概括本章核心情节，请稍候'));
   try {
     const d = await api(`/api/novels/${n.id}/chapter/${index}/summary`, { method: 'POST' });
     state.novel = d.novel;
-    toast('摘要已生成', 'ok');
+    toast(t('摘要已生成'), 'ok');
     renderChapterPage(index);
   } catch (e) {
     toast(e.message, 'err');
@@ -3358,7 +3410,7 @@ async function summarizeChapter(index) {
 async function deleteChapter(index) {
   const n = state.novel;
   if (!n) return;
-  if (!confirm(`确定删除第 ${index} 章吗？删除后后续章节会重新编号，此操作不可恢复。`)) return;
+  if (!confirm(t('确定删除第 {n} 章吗？删除后后续章节会重新编号，此操作不可恢复。', { n: index }))) return;
   try {
     const d = await api(`/api/novels/${n.id}/chapter/${index}`, { method: 'DELETE' });
     state.novel = d.novel;
@@ -3384,7 +3436,7 @@ async function toggleChapterHistory(index) {
   }
   historyPanelVisible = true;
   panel.style.display = 'block';
-  panel.innerHTML = '<div class="meta">加载中...</div>';
+  panel.innerHTML = `<div class="meta">${t('加载中…')}</div>`;
   try {
     const n = state.novel;
     const d = await api(`/api/novels/${n.id}/chapter/${index}/history`);
@@ -3398,30 +3450,30 @@ function renderHistoryList(index, versions) {
   const panel = $('chapter-history-panel');
   if (!panel) return;
   if (!versions.length) {
-    panel.innerHTML = '<div class="meta">暂无历史版本（编辑或重新生成后会自动保存快照）</div>';
+    panel.innerHTML = `<div class="meta">${t('暂无历史版本（编辑或重新生成后会自动保存快照）')}</div>`;
     return;
   }
-  let html = '<div class="meta" style="margin-bottom:8px">历史版本（点击「回退」可恢复到该版本）</div>';
+  let html = `<div class="meta" style="margin-bottom:8px">${t('历史版本（点击「回退」可恢复到该版本）')}</div>`;
   for (const v of versions) {
-    const ts = new Date(v.created_at * 1000).toLocaleString('zh-CN');
+    const ts = fmtDateTime(v.created_at);
     const preview = (v.content || '').substring(0, 50);
-    const sourceLabel = v.source === 'ai' ? 'AI生成' : '手动编辑';
+    const sourceLabel = v.source === 'ai' ? t('AI生成') : t('手动编辑');
     html += `<div class="card" style="padding:12px; margin:8px 0">
       <div class="row" style="align-items:center">
         <span class="meta">${ts}</span>
         <span class="badge" style="margin-left:8px">${esc(sourceLabel)}</span>
         <span class="spacer"></span>
-        <span class="meta">${v.word_count || 0} 字</span>
+        <span class="meta">${t('{n} 字', { n: v.word_count || 0 })}</span>
       </div>
       <div class="meta" style="margin:6px 0">${esc(preview)}${v.content && v.content.length > 50 ? '...' : ''}</div>
-      <button class="btn" onclick="revertToVersion(${index}, '${v.id}')">↩ 回退到此版本</button>
+      <button class="btn" onclick="revertToVersion(${index}, '${v.id}')">↩ ${t('回退到此版本')}</button>
     </div>`;
   }
   panel.innerHTML = html;
 }
 
 async function revertToVersion(index, versionId) {
-  if (!confirm('确定回退到该版本吗？当前内容将被覆盖。')) return;
+  if (!confirm(t('确定回退到该版本吗？当前内容将被覆盖。'))) return;
   try {
     const n = state.novel;
     const d = await api(`/api/novels/${n.id}/chapter/${index}/revert`, {
@@ -3433,7 +3485,7 @@ async function revertToVersion(index, versionId) {
     const panel = $('chapter-history-panel');
     if (panel) panel.style.display = 'none';
     renderChapterPage(index);
-    toast('已回退到指定版本', 'ok');
+    toast(t('已回退到指定版本'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -3452,8 +3504,8 @@ function renderRelations() {
       <select onchange="state.relations[${i}].char1_id=this.value">${opts}</select>
       <span>↔</span>
       <select onchange="state.relations[${i}].char2_id=this.value">${opts}</select>
-      <input placeholder="关系类型(如 师徒/恋人/仇敌)" onchange="state.relations[${i}].type=this.value" value="${esc(r.type)}">
-      <input placeholder="关系描述" style="flex:1" onchange="state.relations[${i}].description=this.value" value="${esc(r.description)}">
+      <input placeholder="${t('关系类型(如 师徒/恋人/仇敌)')}" onchange="state.relations[${i}].type=this.value" value="${esc(r.type)}">
+      <input placeholder="${t('关系描述')}" style="flex:1" onchange="state.relations[${i}].description=this.value" value="${esc(r.description)}">
       <button class="btn danger" onclick="state.relations.splice(${i},1);renderRelations()">✕</button>
     </div>`).join('');
   state.relations.forEach((r, i) => {
@@ -3473,68 +3525,68 @@ function renderWorkspace() {
 
   let html = '';
   const mid = n.text_model_id || state.settings.text_model_id || '';
-  html += `<div class="meta">题材：${esc(n.genre || '不限')} · ${n.chapter_count}章 · ${n.words_per_chapter}字/章 · 角色 ${(n.character_ids || []).length} 个 · 创作模型：${esc(mid ? modelLabel(mid) : '（未配置）')}</div>`;
+  html += `<div class="meta">${t('题材')}：${esc(n.genre || t('不限'))} · ${n.chapter_count}${t('章')} · ${n.words_per_chapter}${t('字/章')} · ${t('角色')} ${(n.character_ids || []).length} ${t('个')} · ${t('创作模型')}：${esc(mid ? modelLabel(mid) : t('（未配置）'))}</div>`;
 
   if (n.summary) {
     if (outlineEditing) {
       // 编辑模式：可编辑梗概与世界观
-      html += `<h4>故事梗概</h4><textarea id="out-edit-summary" rows="4" class="outline-edit">${esc(n.summary)}</textarea>`;
-      if (n.worldbuilding) html += `<h4>世界观</h4><textarea id="out-edit-world" rows="3" class="outline-edit">${esc(n.worldbuilding)}</textarea>`;
+      html += `<h4>${t('故事梗概')}</h4><textarea id="out-edit-summary" rows="4" class="outline-edit">${esc(n.summary)}</textarea>`;
+      if (n.worldbuilding) html += `<h4>${t('世界观')}</h4><textarea id="out-edit-world" rows="3" class="outline-edit">${esc(n.worldbuilding)}</textarea>`;
     } else {
-      html += `<h4>故事梗概</h4><div class="chapter-content">${esc(n.summary)}</div>`;
-      if (n.worldbuilding) html += `<h4>世界观</h4><div class="chapter-content">${esc(n.worldbuilding)}</div>`;
+      html += `<h4>${t('故事梗概')}</h4><div class="chapter-content">${esc(n.summary)}</div>`;
+      if (n.worldbuilding) html += `<h4>${t('世界观')}</h4><div class="chapter-content">${esc(n.worldbuilding)}</div>`;
     }
   }
 
   html += `<div style="margin-top:16px">
-    <button class="btn primary" onclick="prepareNovel()">${n.summary ? '重新生成大纲' : '① 生成大纲'}</button>
-    ${n.chapters && n.chapters.length ? `<button class="btn primary" onclick="generateAll()">② 逐章生成全文（${total} 章）</button>` : ''}
+    <button class="btn primary" onclick="prepareNovel()">${n.summary ? t('重新生成大纲') : '① ' + t('生成大纲')}</button>
+    ${n.chapters && n.chapters.length ? `<button class="btn primary" onclick="generateAll()">② ${t('逐章生成全文（{n} 章）', { n: total })}</button>` : ''}
     <select id="export-format" style="padding:4px 8px; border-radius:4px; border:1px solid #ccc">
       <option value="md">Markdown</option>
-      <option value="txt">TXT 纯文本</option>
-      <option value="epub">EPUB 电子书</option>
+      <option value="txt">${t('TXT 纯文本')}</option>
+      <option value="epub">${t('EPUB 电子书')}</option>
     </select>
-    <button class="btn" onclick="exportNovel('${n.id}', document.getElementById('export-format').value)">导出</button>
+    <button class="btn" onclick="exportNovel('${n.id}', document.getElementById('export-format').value)">${t('导出')}</button>
     ${n.summary ? (outlineEditing
-      ? `<button class="btn primary" onclick="saveOutline()">保存大纲</button>
-         <button class="btn" onclick="toggleOutlineEdit()">取消</button>`
-      : `<button class="btn" onclick="toggleOutlineEdit()">编辑大纲</button>`) : ''}
+      ? `<button class="btn primary" onclick="saveOutline()">${t('保存大纲')}</button>
+         <button class="btn" onclick="toggleOutlineEdit()">${t('取消')}</button>`
+      : `<button class="btn" onclick="toggleOutlineEdit()">${t('编辑大纲')}</button>`) : ''}
   </div>`;
 
   if (n.chapters && n.chapters.length) {
-    html += `<h4>章节大纲</h4>`;
+    html += `<h4>${t('章节大纲')}</h4>`;
     html += n.chapters.map((c) => {
       if (outlineEditing) {
         return `
           <div class="chapter-outline outline-edit-row">
-            <label class="outline-idx">第${c.index}章</label>
-            <input id="out-edit-title-${c.index}" value="${esc(c.title || '')}" placeholder="章节标题">
-            <input id="out-edit-sum-${c.index}" value="${esc(c.summary || '')}" placeholder="一句话内容概要">
-            ${c.content ? `<span class="badge">已生成</span>` : ''}
+            <label class="outline-idx">${t('第 {n} 章', { n: c.index })}</label>
+            <input id="out-edit-title-${c.index}" value="${esc(c.title || '')}" placeholder="${t('章节标题')}">
+            <input id="out-edit-sum-${c.index}" value="${esc(c.summary || '')}" placeholder="${t('一句话内容概要')}">
+            ${c.content ? `<span class="badge">${t('已生成')}</span>` : ''}
           </div>`;
       }
       return `
         <div class="chapter-outline">
-          <b>第${c.index}章 ${esc(c.title || '')}</b>
+          <b>${t('第 {n} 章', { n: c.index })} ${esc(c.title || '')}</b>
           <span class="meta">${esc(c.summary || '')}</span>
           <span class="spacer"></span>
           ${c.content
-            ? `<span class="badge">已生成 ${c.word_count || ''} 字</span>
-               <button class="btn" onclick="nav('#/novels/${n.id}/chapter/${c.index}')">查看/重新生成</button>`
-            : `<button class="btn primary" onclick="nav('#/novels/${n.id}/chapter/${c.index}')">生成本章</button>`}
+            ? `<span class="badge">${t('已生成')} ${c.word_count || ''} ${t('字')}</span>
+               <button class="btn" onclick="nav('#/novels/${n.id}/chapter/${c.index}')">${t('查看/重新生成')}</button>`
+            : `<button class="btn primary" onclick="nav('#/novels/${n.id}/chapter/${c.index}')">${t('生成本章')}</button>`}
         </div>`;
     }).join('');
   }
 
   const done = (n.chapters || []).filter(c => c.content);
   if (done.length) {
-    html += `<h4>正文预览</h4>`;
+    html += `<h4>${t('正文预览')}</h4>`;
     html += done.map(c => `
       <div class="card chapter-preview-card" onclick="nav('#/novels/${n.id}/chapter/${c.index}')">
-        <div class="row"><span class="title">第${c.index}章 ${esc(c.title || '')}</span>
-        <span class="meta">约 ${c.word_count || ''} 字</span>
+        <div class="row"><span class="title">${t('第 {n} 章', { n: c.index })} ${esc(c.title || '')}</span>
+        <span class="meta">${t('约 {n} 字', { n: c.word_count || '' })}</span>
         <span class="spacer"></span>
-        <button class="btn">查看全文 →</button></div>
+        <button class="btn">${t('查看全文')} →</button></div>
         <div class="chapter-content">${esc(c.content.slice(0, 200))}${c.content.length > 200 ? '…' : ''}</div>
       </div>`).join('');
   }
@@ -3544,12 +3596,12 @@ function renderWorkspace() {
 
 async function prepareNovel() {
   const id = state.novel.id;
-  showLoading('正在生成大纲…', 'AI 正在分析写作风格并构建故事梗概与章节大纲，请稍候');
+  showLoading(t('正在生成大纲…'), t('AI 正在分析写作风格并构建故事梗概与章节大纲，请稍候'));
   try {
     const d = await api(`/api/novels/${id}/prepare`, { method: 'POST' });
     state.novel = d.novel;
     renderWorkspace();
-    toast('大纲生成完成', 'ok');
+    toast(t('大纲生成完成'), 'ok');
   } catch (e) {
     toast(e.message, 'err');
   } finally {
@@ -3571,14 +3623,14 @@ async function streamApi(path, onEvent, body) {
     res = await fetch(path, opts);
   } catch (e) {
     // 网络层错误（连接中断/代理超时等），转为友好中文提示
-    throw new Error('网络连接中断，请重试。若原文较长，可尝试稍后重试或检查网络/代理设置。');
+    throw new Error(t('网络连接中断，请重试。若原文较长，可尝试稍后重试或检查网络/代理设置。'));
   }
   if (res.status === 401) {
     handleUnauthorized();
-    throw new Error('未登录或登录已过期');
+    throw new Error(t('未登录或登录已过期'));
   }
   if (!res.ok || !res.body) {
-    let msg = '请求失败（' + res.status + '）';
+    let msg = t('请求失败（{n}）', { n: res.status });
     try {
       const d = await res.json();
       msg = (typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail || d)) || msg;
@@ -3596,7 +3648,7 @@ async function streamApi(path, onEvent, body) {
       chunk = r.value;
     } catch (e) {
       // 读取 SSE 流时连接中断
-      throw new Error('网络连接中断，请重试。若原文较长，可尝试稍后重试或检查网络/代理设置。');
+      throw new Error(t('网络连接中断，请重试。若原文较长，可尝试稍后重试或检查网络/代理设置。'));
     }
     buf += decoder.decode(chunk, { stream: true });
     let idx;
@@ -3621,7 +3673,7 @@ function showGenPanel(index, label) {
     <div class="card gen-panel" id="${panelId}">
       <div class="row">
         <span class="title">${label}</span>
-        <span class="badge gen-badge" id="${panelId}-badge">生成中…</span>
+        <span class="badge gen-badge" id="${panelId}-badge">${t('生成中…')}</span>
         <span class="spacer"></span>
         <span class="meta" id="${panelId}-words"></span>
       </div>
@@ -3639,7 +3691,7 @@ async function generateChapterStream(index, outEl, badgeEl, wordsEl) {
   let timer = null;
   // 等待首个 delta 超过 90 秒（模型在思考/推理），提示用户
   const waitTimer = setTimeout(() => {
-    if (!receivedAny && badgeEl) badgeEl.textContent = '模型思考中（推理模型可能较慢）…';
+    if (!receivedAny && badgeEl) badgeEl.textContent = t('模型思考中（推理模型可能较慢）…');
   }, 9000);
   try {
     await streamApi(`/api/novels/${id}/chapter/${index}/stream`, (ev) => {
@@ -3647,14 +3699,14 @@ async function generateChapterStream(index, outEl, badgeEl, wordsEl) {
         if (!receivedAny) {
           receivedAny = true;
           clearTimeout(waitTimer);
-          if (badgeEl) badgeEl.textContent = '生成中…';
+          if (badgeEl) badgeEl.textContent = t('生成中…');
         }
         full += ev.content;
         if (outEl) { outEl.textContent = full; outEl.scrollTop = outEl.scrollHeight; }
       } else if (ev.type === 'chapter_done') {
         wordCount = ev.word_count || 0;
-        if (wordsEl) wordsEl.textContent = `约 ${wordCount} 字`;
-        if (badgeEl) badgeEl.textContent = '正文完成，正在生成摘要…';
+        if (wordsEl) wordsEl.textContent = t('约 {n} 字', { n: wordCount });
+        if (badgeEl) badgeEl.textContent = t('正文完成，正在生成摘要…');
       } else if (ev.type === 'done') {
         state.novel = ev.novel;
       } else if (ev.type === 'error') {
@@ -3665,10 +3717,10 @@ async function generateChapterStream(index, outEl, badgeEl, wordsEl) {
     clearTimeout(waitTimer);
   }
   if (!receivedAny) {
-    throw new Error('模型未返回任何内容（可能被服务商拒绝或超时）。可尝试换模型或重新点击。');
+    throw new Error(t('模型未返回任何内容（可能被服务商拒绝或超时）。可尝试换模型或重新点击。'));
   }
   if (wordCount === 0 && !full.trim()) {
-    throw new Error('生成完成但内容为空。请重试或换模型。');
+    throw new Error(t('生成完成但内容为空。请重试或换模型。'));
   }
   return full;
 }
@@ -3684,7 +3736,7 @@ async function improvRegenerateStream(index, instruction, outEl, badgeEl, wordsE
   let wordCount = 0;
   let receivedAny = false;
   const waitTimer = setTimeout(() => {
-    if (!receivedAny && badgeEl) badgeEl.textContent = '模型思考中（推理模型可能较慢）…';
+    if (!receivedAny && badgeEl) badgeEl.textContent = t('模型思考中（推理模型可能较慢）…');
   }, 9000);
   try {
     await streamApi(`/api/novels/${id}/improv/stream`, (ev) => {
@@ -3692,14 +3744,14 @@ async function improvRegenerateStream(index, instruction, outEl, badgeEl, wordsE
         if (!receivedAny) {
           receivedAny = true;
           clearTimeout(waitTimer);
-          if (badgeEl) badgeEl.textContent = '生成中…';
+          if (badgeEl) badgeEl.textContent = t('生成中…');
         }
         full += ev.content;
         if (outEl) { outEl.textContent = full; outEl.scrollTop = outEl.scrollHeight; }
       } else if (ev.type === 'chapter_done') {
         wordCount = ev.word_count || 0;
-        if (wordsEl) wordsEl.textContent = `约 ${wordCount} 字`;
-        if (badgeEl) badgeEl.textContent = '正文完成，正在生成摘要…';
+        if (wordsEl) wordsEl.textContent = t('约 {n} 字', { n: wordCount });
+        if (badgeEl) badgeEl.textContent = t('正文完成，正在生成摘要…');
       } else if (ev.type === 'done') {
         state.novel = ev.novel;
       } else if (ev.type === 'error') {
@@ -3710,16 +3762,16 @@ async function improvRegenerateStream(index, instruction, outEl, badgeEl, wordsE
     clearTimeout(waitTimer);
   }
   if (!receivedAny) {
-    throw new Error('模型未返回任何内容（可能被服务商拒绝或超时）。可尝试换模型或重新点击。');
+    throw new Error(t('模型未返回任何内容（可能被服务商拒绝或超时）。可尝试换模型或重新点击。'));
   }
   if (wordCount === 0 && !full.trim()) {
-    throw new Error('生成完成但内容为空。请重试或换模型。');
+    throw new Error(t('生成完成但内容为空。请重试或换模型。'));
   }
   return full;
 }
 
 async function generateChapter(index) {
-  const panelId = showGenPanel(index, `第 ${index} 章 生成中`);
+  const panelId = showGenPanel(index, t('第 {n} 章 生成中', { n: index }));
   const out = $(panelId + '-out');
   const badge = $(panelId + '-badge');
   const words = $(panelId + '-words');
@@ -3728,14 +3780,14 @@ async function generateChapter(index) {
     $(panelId).remove();
     renderWorkspace();
     loadNovels();
-    toast(`第 ${index} 章完成`, 'ok');
+    toast(t('第 {n} 章完成', { n: index }), 'ok');
   } catch (e) {
     // 错误时保留面板，把内容改为错误提示，便于排查
     if (out) {
       out.textContent = '⚠️ ' + e.message;
       out.classList.add('gen-error');
     }
-    if (badge) badge.textContent = '生成失败';
+    if (badge) badge.textContent = t('生成失败');
     toast(e.message, 'err');
     // 8 秒后自动关闭错误面板
     setTimeout(() => { try { $(panelId).remove(); } catch (e) {} }, 8000);
@@ -3746,28 +3798,28 @@ async function generateAll() {
   const n = state.novel;
   const total = n.chapters.length;
   const start = n.chapters.filter(c => c.content).length;
-  if (!confirm(`将依次生成全部 ${total} 章（已完成 ${start} 章），可能耗时较长。确定开始？`)) return;
+  if (!confirm(t('将依次生成全部 {n} 章（已完成 {m} 章），可能耗时较长。确定开始？', { n: total, m: start }))) return;
 
   const ws = $('workspace');
   const progId = 'prog-' + Date.now();
   ws.insertAdjacentHTML('afterbegin', `
     <div class="card gen-panel" id="${progId}">
-      <div>正在逐章生成… <span id="${progId}-txt"></span></div>
+      <div>${t('正在逐章生成…')} <span id="${progId}-txt"></span></div>
       <div class="progress-wrap"><div class="progress-bar" id="${progId}-bar"></div></div>
       <div class="gen-output" id="${progId}-out"></div>
     </div>`);
   const bar = $(progId + '-bar'), txt = $(progId + '-txt'), out = $(progId + '-out');
 
   for (let i = 1; i <= total; i++) {
-    txt.textContent = `第 ${i} / ${total} 章`;
+    txt.textContent = t('第 {i} / {n} 章', { i, n: total });
     bar.style.width = (i / total * 100) + '%';
     out.textContent = '';
     try {
       await generateChapterStream(i, out, null, null);
     } catch (e) {
-      toast(`第 ${i} 章生成失败：${e.message}`, 'err');
+      toast(t('第 {n} 章生成失败：{m}', { n: i, m: e.message }), 'err');
       if (out) {
-        out.textContent = `第 ${i} 章失败：${e.message}\n（已停止后续章节）`;
+        out.textContent = t('第 {n} 章失败：{m}', { n: i, m: e.message }) + '\n' + t('（已停止后续章节）');
         out.classList.add('gen-error');
       }
       renderWorkspace();
@@ -3777,7 +3829,7 @@ async function generateAll() {
   $(progId).remove();
   renderWorkspace();
   loadNovels();
-  toast('全部章节生成完成', 'ok');
+  toast(t('全部章节生成完成'), 'ok');
 }
 
 async function exportNovel(id, format) {
@@ -3787,7 +3839,7 @@ async function exportNovel(id, format) {
     const fmt = format || 'md';
     const res = await fetch(`/api/novels/${id}/export?format=${fmt}`, { headers });
     if (res.status === 401) { handleUnauthorized(); return; }
-    if (!res.ok) { toast('导出失败', 'err'); return; }
+    if (!res.ok) { toast(t('导出失败'), 'err'); return; }
     const blob = await res.blob();
     // 从 Content-Disposition 解析文件名
     let fname = 'novel.' + fmt;
@@ -3800,7 +3852,7 @@ async function exportNovel(id, format) {
     document.body.appendChild(a); a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  } catch (e) { toast('导出失败：' + e.message, 'err'); }
+  } catch (e) { toast(t('导出失败：') + e.message, 'err'); }
 }
 
 // 前端文本下载工具
@@ -3835,19 +3887,18 @@ function renderLogs(data) {
   const totalPages = data.total_pages || 1;
 
   if (!logs.length) {
-    box.innerHTML = '<div class="card meta">暂无 AI 请求日志。生成大纲、章节或分析照片后会自动记录。</div>';
+    box.innerHTML = `<div class="card meta">${t('暂无 AI 请求日志。生成大纲、章节或分析照片后会自动记录。')}</div>`;
     return;
   }
 
   const listHtml = logs.map(l => {
-    const t = new Date((l.created_at || 0) * 1000);
-    const timeStr = t.toLocaleString('zh-CN', { hour12: false });
+    const timeStr = fmtDateTime(l.created_at || 0);
     // 优先显示语义化名称（如「生成章节」「生成摘要」），无则回退到类型
-    const kindLabel = { 'chat': '文本', 'chat_stream': '流式', 'vision': '视觉' }[l.kind] || l.kind;
+    const kindLabel = { 'chat': t('文本'), 'chat_stream': t('流式'), 'vision': t('视觉') }[l.kind] || l.kind;
     const nameLabel = l.name || kindLabel;
     const statusBadge = l.status === 'ok'
-      ? '<span class="badge">成功</span>'
-      : '<span class="badge" style="background:var(--danger);color:#fff">失败</span>';
+      ? `<span class="badge">${t('成功')}</span>`
+      : `<span class="badge" style="background:var(--danger);color:#fff">${t('失败')}</span>`;
     const tokens = (l.prompt_tokens != null || l.completion_tokens != null)
       ? ` · tokens: ${l.prompt_tokens ?? '-'} / ${l.completion_tokens ?? '-'}` : '';
     const elapsed = l.elapsed != null ? ` · ${(l.elapsed * 1000).toFixed(0)}ms` : '';
@@ -3860,9 +3911,9 @@ function renderLogs(data) {
           <span class="spacer"></span>
           <span class="meta">${esc(timeStr)}${esc(tokens)}${esc(elapsed)}</span>
         </div>
-        ${l.error ? `<div class="meta" style="color:var(--danger)">错误：${esc(l.error)}</div>` : ''}
+        ${l.error ? `<div class="meta" style="color:var(--danger)">${t('错误')}：${esc(l.error)}</div>` : ''}
         <details class="log-detail">
-          <summary>查看提示词</summary>
+          <summary>${t('查看提示词')}</summary>
           <pre class="log-prompt">${esc(l.prompt || '')}</pre>
         </details>
       </div>`;
@@ -3871,18 +3922,18 @@ function renderLogs(data) {
   // 分页控件
   const pager = `
     <div class="pager">
-      <button class="btn" ${page <= 1 ? 'disabled' : ''} onclick="loadLogs(${page - 1})">← 上一页</button>
-      <span class="meta">第 ${page} / ${totalPages} 页 · 共 ${total} 条</span>
-      <button class="btn" ${page >= totalPages ? 'disabled' : ''} onclick="loadLogs(${page + 1})">下一页 →</button>
+      <button class="btn" ${page <= 1 ? 'disabled' : ''} onclick="loadLogs(${page - 1})">← ${t('上一页')}</button>
+      <span class="meta">${t('第 {p} / {n} 页', { p: page, n: totalPages })} · ${t('共 {n} 条', { n: total })}</span>
+      <button class="btn" ${page >= totalPages ? 'disabled' : ''} onclick="loadLogs(${page + 1})">${t('下一页')} →</button>
     </div>`;
 
   box.innerHTML = listHtml + pager;
 }
 
 async function clearLogs() {
-  if (!confirm('确定清空所有请求日志？此操作不可恢复。')) return;
+  if (!confirm(t('确定清空所有请求日志？此操作不可恢复。'))) return;
   // 后端未提供删除接口，简单提示（可扩展）
-  toast('当前版本不支持直接清空（数据保留供排查）', 'err');
+  toast(t('当前版本不支持直接清空（数据保留供排查）'), 'err');
 }
 
 // ============ 题材库 ============
@@ -3899,7 +3950,7 @@ function renderGenres() {
   const box = $('genre-list');
   if (!box) return;
   if (!state.genres.length) {
-    box.innerHTML = '<div class="card meta">暂无题材，点「＋ 添加题材」或「导入题材库」。</div>';
+    box.innerHTML = `<div class="card meta">${t('暂无题材，点「＋ 添加题材」或「导入题材库」。')}</div>`;
     return;
   }
   box.innerHTML = state.genres.map(g => `
@@ -3907,12 +3958,12 @@ function renderGenres() {
       <div class="row">
         <span class="title">${esc(g.name)}</span>
         <span class="spacer"></span>
-        <button class="btn" onclick="editGenre('${g.id}')">编辑</button>
-        <button class="btn danger" onclick="deleteGenre('${g.id}')">删除</button>
+        <button class="btn" onclick="editGenre('${g.id}')">${t('编辑')}</button>
+        <button class="btn danger" onclick="deleteGenre('${g.id}')">${t('删除')}</button>
       </div>
       ${g.description ? `<div class="meta">${esc(g.description)}</div>` : ''}
-      ${g.style ? `<div class="meta"><b>风格：</b>${esc(g.style)}</div>` : ''}
-      ${g.reference_text ? `<div class="meta"><b>参考文本：</b>${esc(g.reference_text.slice(0, 80))}${g.reference_text.length > 80 ? '…' : ''}</div>` : ''}
+      ${g.style ? `<div class="meta"><b>${t('风格')}：</b>${esc(g.style)}</div>` : ''}
+      ${g.reference_text ? `<div class="meta"><b>${t('参考文本')}：</b>${esc(g.reference_text.slice(0, 80))}${g.reference_text.length > 80 ? '…' : ''}</div>` : ''}
     </div>`).join('');
 }
 
@@ -3928,7 +3979,7 @@ function renderGenreSelect() {
   const sel = $('n-genre-select');
   if (sel) {
     const cur = sel.value;
-    const opts = ['<option value="">不使用题材库</option>'];
+    const opts = [`<option value="">${t('不使用题材库')}</option>`];
     (state.genres || []).forEach(g => {
       opts.push(`<option value="${g.id}">${esc(g.name)}</option>`);
     });
@@ -3955,12 +4006,12 @@ function applyGenreTemplate() {
   // 题材库只填充「风格」「参考文本」，不影响独立的「题材类型」「故事背景」字段
   if (g.style && $('n-style')) $('n-style').value = g.style;
   if (g.reference_text && $('n-reference')) $('n-reference').value = g.reference_text;
-  toast('已套用题材「' + g.name + '」的风格与参考文本', 'ok');
+  toast(t('已套用题材「{name}」的风格与参考文本', { name: g.name }), 'ok');
 }
 
 function showGenreForm() {
   state.editingGenreId = null;
-  $('genre-form-title').textContent = '添加题材';
+  $('genre-form-title').textContent = t('添加题材');
   ['g-name', 'g-style', 'g-reference', 'g-description'].forEach(i => $(i).value = '');
   $('genre-form').style.display = 'block';
   $('genre-import').style.display = 'none';
@@ -3970,7 +4021,7 @@ function editGenre(id) {
   const g = (state.genres || []).find(x => x.id === id);
   if (!g) return;
   state.editingGenreId = id;
-  $('genre-form-title').textContent = '编辑题材';
+  $('genre-form-title').textContent = t('编辑题材');
   $('g-name').value = g.name || '';
   $('g-style').value = g.style || '';
   $('g-reference').value = g.reference_text || '';
@@ -3986,7 +4037,7 @@ function hideGenreForm() {
 
 async function saveGenre() {
   const name = $('g-name').value.trim();
-  if (!name) return toast('请填写题材名称', 'err');
+  if (!name) return toast(t('请填写题材名称'), 'err');
   const body = {
     name,
     style: $('g-style').value.trim(),
@@ -4005,16 +4056,16 @@ async function saveGenre() {
     }
     hideGenreForm();
     await loadGenres();
-    toast('题材已保存', 'ok');
+    toast(t('题材已保存'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
 async function deleteGenre(id) {
-  if (!confirm('确定删除该题材？')) return;
+  if (!confirm(t('确定删除该题材？'))) return;
   try {
     await api('/api/genres/' + id, { method: 'DELETE' });
     await loadGenres();
-    toast('题材已删除', 'ok');
+    toast(t('题材已删除'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -4029,18 +4080,18 @@ function hideGenreImport() {
 
 async function importGenres() {
   const text = $('g-import-text').value.trim();
-  if (!text) return toast('请粘贴 JSON 数据', 'err');
+  if (!text) return toast(t('请粘贴 JSON 数据'), 'err');
   let items;
   try {
     items = JSON.parse(text);
   } catch (e) {
-    return toast('JSON 格式错误：' + e.message, 'err');
+    return toast(t('JSON 格式错误：') + e.message, 'err');
   }
   if (!Array.isArray(items)) {
     // 兼容对象包裹 {genres: [...]}
     items = items.genres || [];
   }
-  if (!items.length) return toast('没有可导入的题材', 'err');
+  if (!items.length) return toast(t('没有可导入的题材'), 'err');
   try {
     const d = await api('/api/genres/import', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4049,7 +4100,7 @@ async function importGenres() {
     hideGenreImport();
     $('g-import-text').value = '';
     await loadGenres();
-    toast(`成功导入 ${d.imported} 个题材`, 'ok');
+    toast(t('成功导入 {n} 个题材', { n: d.imported }), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -4078,7 +4129,7 @@ async function renderNovelWorldbookSelect() {
   const list = worldbooksState.list;
   const selected = (state.novel && state.novel.worldbook_ids) || [];
   if (!list.length) {
-    box.innerHTML = '<span class="meta">暂无世界书，可先到「世界书」页创建或导入。</span>';
+    box.innerHTML = `<span class="meta">${t('暂无世界书，可先到「世界书」页创建或导入。')}</span>`;
     return;
   }
   box.innerHTML = list.map(wb => {
@@ -4087,7 +4138,7 @@ async function renderNovelWorldbookSelect() {
     <label class="worldbook-select-item">
       <input type="checkbox" value="${esc(wb.id)}" ${checked ? 'checked' : ''} onchange="toggleNovelWorldbook('${esc(wb.id)}', this.checked)">
       <span class="worldbook-select-name">${esc(wb.name)}</span>
-      <span class="meta">${(wb.entries || []).length} 条目</span>
+      <span class="meta">${(wb.entries || []).length} ${t('条目')}</span>
     </label>`;
   }).join('');
 }
@@ -4108,7 +4159,7 @@ function renderWorldbooks() {
   if (!box) return;
   const list = worldbooksState.list;
   if (!list.length) {
-    box.innerHTML = '<div class="card meta">暂无世界书，点击右上角「新建世界书」或「导入世界书」开始。</div>';
+    box.innerHTML = `<div class="card meta">${t('暂无世界书，点击右上角「新建世界书」或「导入世界书」开始。')}</div>`;
     return;
   }
   box.innerHTML = list.map(wb => {
@@ -4118,12 +4169,12 @@ function renderWorldbooks() {
     <div class="card worldbook-item">
       <div class="row">
         <span class="title">${esc(wb.name)}</span>
-        <span class="badge">${entries.length} 条目</span>
-        ${enabledCount !== entries.length ? `<span class="badge">启用 ${enabledCount}</span>` : ''}
+        <span class="badge">${entries.length} ${t('条目')}</span>
+        ${enabledCount !== entries.length ? `<span class="badge">${t('启用')} ${enabledCount}</span>` : ''}
         <span class="spacer"></span>
-        <button class="btn" onclick="toggleWorldbookEntries('${wb.id}')">条目</button>
-        <button class="btn" onclick="startEditWorldbook('${wb.id}')">编辑</button>
-        <button class="btn danger" onclick="deleteWorldbook('${wb.id}')">删除</button>
+        <button class="btn" onclick="toggleWorldbookEntries('${wb.id}')">${t('条目')}</button>
+        <button class="btn" onclick="startEditWorldbook('${wb.id}')">${t('编辑')}</button>
+        <button class="btn danger" onclick="deleteWorldbook('${wb.id}')">${t('删除')}</button>
       </div>
       ${wb.description ? `<div class="meta">${esc(wb.description)}</div>` : ''}
       <div id="wb-entries-${wb.id}" style="display:none"></div>
@@ -4141,7 +4192,7 @@ function toggleWorldbookEntries(wid) {
     wrap.style.display = 'block';
     const entries = wb.entries || [];
     if (!entries.length) {
-      wrap.innerHTML = '<div class="meta" style="margin-top:8px">该世界书暂无条目，可通过「导入」添加。</div>';
+      wrap.innerHTML = `<div class="meta" style="margin-top:8px">${t('该世界书暂无条目，可通过「导入」添加。')}</div>`;
       return;
     }
     wrap.innerHTML = `
@@ -4149,13 +4200,13 @@ function toggleWorldbookEntries(wid) {
         ${entries.map((e, i) => `
           <div class="worldbook-entry ${e.enabled === false ? 'disabled' : ''}">
             <div class="row">
-              <span class="worldbook-entry-key">${esc((e.key || []).join(' / ') || '（无关键词）')}</span>
+              <span class="worldbook-entry-key">${esc((e.key || []).join(' / ') || t('（无关键词）'))}</span>
               ${e.comment ? `<span class="meta">${esc(e.comment)}</span>` : ''}
-              ${e.constant ? '<span class="badge">恒常</span>' : ''}
-              ${e.enabled === false ? '<span class="badge">已禁用</span>' : ''}
+              ${e.constant ? `<span class="badge">${t('恒常')}</span>` : ''}
+              ${e.enabled === false ? `<span class="badge">${t('已禁用')}</span>` : ''}
               <span class="spacer"></span>
-              <button class="dialog-act-btn" onclick="editWorldbookEntry('${wb.id}', ${i})">编辑</button>
-              <button class="dialog-act-btn danger" onclick="deleteWorldbookEntry('${wb.id}', ${i})">删除</button>
+              <button class="dialog-act-btn" onclick="editWorldbookEntry('${wb.id}', ${i})">${t('编辑')}</button>
+              <button class="dialog-act-btn danger" onclick="deleteWorldbookEntry('${wb.id}', ${i})">${t('删除')}</button>
             </div>
             <div class="worldbook-entry-content">${esc(e.content || '')}</div>
           </div>`).join('')}
@@ -4168,7 +4219,7 @@ function toggleWorldbookEntries(wid) {
 // 新建世界书
 function showWorldbookForm() {
   worldbooksState.editingId = null;
-  $('worldbook-form-title').textContent = '新建世界书';
+  $('worldbook-form-title').textContent = t('新建世界书');
   $('wb-name').value = '';
   $('wb-description').value = '';
   $('worldbook-form').style.display = 'block';
@@ -4182,7 +4233,7 @@ function startEditWorldbook(wid) {
   const wb = worldbooksState.list.find(x => x.id === wid);
   if (!wb) return;
   worldbooksState.editingId = wid;
-  $('worldbook-form-title').textContent = '编辑世界书';
+  $('worldbook-form-title').textContent = t('编辑世界书');
   $('wb-name').value = wb.name || '';
   $('wb-description').value = wb.description || '';
   $('worldbook-form').style.display = 'block';
@@ -4191,19 +4242,19 @@ function startEditWorldbook(wid) {
 
 async function saveWorldbook() {
   const name = $('wb-name').value.trim();
-  if (!name) return toast('请填写世界书名称', 'err');
+  if (!name) return toast(t('请填写世界书名称'), 'err');
   const body = { name, description: $('wb-description').value.trim() };
   try {
     if (worldbooksState.editingId) {
       await api('/api/worldbooks/' + worldbooksState.editingId, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
-      toast('世界书已更新', 'ok');
+      toast(t('世界书已更新'), 'ok');
     } else {
       await api('/api/worldbooks', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
-      toast('世界书已创建', 'ok');
+      toast(t('世界书已创建'), 'ok');
     }
     worldbooksState.editingId = null;
     hideWorldbookForm();
@@ -4212,11 +4263,11 @@ async function saveWorldbook() {
 }
 
 async function deleteWorldbook(wid) {
-  if (!confirm('确定删除该世界书？')) return;
+  if (!confirm(t('确定删除该世界书？'))) return;
   try {
     await api('/api/worldbooks/' + wid, { method: 'DELETE' });
     await loadWorldbooks();
-    toast('已删除', 'ok');
+    toast(t('已删除'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -4245,12 +4296,12 @@ function onWorldbookFileSelected(input) {
 
 async function importWorldbook() {
   const text = $('wb-import-text').value.trim();
-  if (!text) return toast('请粘贴 JSON 或选择文件', 'err');
+  if (!text) return toast(t('请粘贴 JSON 或选择文件'), 'err');
   let data;
   try {
     data = JSON.parse(text);
   } catch (e) {
-    return toast('JSON 格式错误：' + e.message, 'err');
+    return toast(t('JSON 格式错误：') + e.message, 'err');
   }
   try {
     const d = await api('/api/worldbooks/import', {
@@ -4265,7 +4316,7 @@ async function importWorldbook() {
     $('wb-import-name').value = '';
     $('wb-import-file').value = '';
     await loadWorldbooks();
-    toast(`成功导入世界书，共 ${d.imported} 个条目`, 'ok');
+    toast(t('成功导入世界书，共 {n} 个条目', { n: d.imported }), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -4282,25 +4333,25 @@ function editWorldbookEntry(wid, idx) {
   const constant = !!entry.constant;
   const html = `
     <div class="card" style="margin-top:10px">
-      <span class="title">编辑条目</span>
+      <span class="title">${t('编辑条目')}</span>
       <div class="form-grid">
-        <label>触发关键词（逗号分隔）
+        <label>${t('触发关键词（逗号分隔）')}
           <input id="we-key" value="${esc(keys)}">
         </label>
-        <label>备注
+        <label>${t('备注')}
           <input id="we-comment" value="${esc(comment)}">
         </label>
       </div>
-      <label>条目内容
+      <label>${t('条目内容')}
         <textarea id="we-content" rows="5">${esc(content)}</textarea>
       </label>
       <div class="row" style="margin-top:8px">
-        <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="we-enabled" ${enabled ? 'checked' : ''}> 启用</label>
-        <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="we-constant" ${constant ? 'checked' : ''}> 恒常注入</label>
+        <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="we-enabled" ${enabled ? 'checked' : ''}> ${t('启用')}</label>
+        <label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="we-constant" ${constant ? 'checked' : ''}> ${t('恒常注入')}</label>
       </div>
       <div style="margin-top:10px">
-        <button class="btn primary" onclick="saveWorldbookEntry('${wid}', ${idx})">保存</button>
-        <button class="btn" onclick="toggleWorldbookEntries('${wid}'); toggleWorldbookEntries('${wid}')">取消</button>
+        <button class="btn primary" onclick="saveWorldbookEntry('${wid}', ${idx})">${t('保存')}</button>
+        <button class="btn" onclick="toggleWorldbookEntries('${wid}'); toggleWorldbookEntries('${wid}')">${t('取消')}</button>
       </div>
     </div>`;
   const wrap = $('wb-entries-' + wid);
@@ -4323,7 +4374,7 @@ async function saveWorldbookEntry(wid, idx) {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ entries: wb.entries }),
     });
-    toast('条目已保存', 'ok');
+    toast(t('条目已保存'), 'ok');
     await loadWorldbooks();
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -4331,14 +4382,14 @@ async function saveWorldbookEntry(wid, idx) {
 async function deleteWorldbookEntry(wid, idx) {
   const wb = worldbooksState.list.find(x => x.id === wid);
   if (!wb) return;
-  if (!confirm('确定删除该条目？')) return;
+  if (!confirm(t('确定删除该条目？'))) return;
   wb.entries.splice(idx, 1);
   try {
     await api('/api/worldbooks/' + wid, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ entries: wb.entries }),
     });
-    toast('条目已删除', 'ok');
+    toast(t('条目已删除'), 'ok');
     await loadWorldbooks();
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -4372,7 +4423,7 @@ async function saveOutline() {
     state.novel = d.novel;
     outlineEditing = false;
     renderWorkspace();
-    toast('大纲已保存', 'ok');
+    toast(t('大纲已保存'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -4396,11 +4447,11 @@ function onSourceFilePicked(input) {
     const ta = $('n-source');
     if (ta) ta.value = text;
     const info = $('n-source-info');
-    if (info) info.textContent = `已导入：${file.name}（${text.length} 字）`;
-    toast('原文已导入', 'ok');
+    if (info) info.textContent = t('已导入：{f}（{n} 字）', { f: file.name, n: text.length });
+    toast(t('原文已导入'), 'ok');
     maybeAutoAnalyze();  // 清除旧的拆解结果
   };
-  reader.onerror = () => toast('文件读取失败', 'err');
+  reader.onerror = () => toast(t('文件读取失败'), 'err');
   reader.readAsText(file, 'utf-8');
   input.value = '';  // 允许重复选择同一文件
 }
@@ -4411,7 +4462,7 @@ async function openRewritePage(id) {
     const d = await api('/api/novels/' + id);
     state.novel = d.novel;
     currentNovelId = id;
-    $('rewrite-title').textContent = '《' + (state.novel.title || '未命名') + '》 改写创作';
+    $('rewrite-title').textContent = `《${state.novel.title || t('未命名')}》 ${t('改写创作')}`;
     const editLink = $('rewrite-edit-link');
     if (editLink) editLink.setAttribute('href', '#/novels/' + id + '/edit');
     $('rewrite-instruction').value = state.novel.task_instruction || '';
@@ -4428,13 +4479,13 @@ function renderRewrite() {
   const chapters = n.chapters || [];
   const doneCount = chapters.filter(c => c.summary).length;
   const hint = $('rewrite-chapter-hint');
-  if (hint) hint.textContent = chapters.length ? `共 ${chapters.length} 段 · 已改写 ${doneCount} 段` : '';
+  if (hint) hint.textContent = chapters.length ? t('共 {n} 段 · 已改写 {m} 段', { n: chapters.length, m: doneCount }) : '';
   const readBtn = $('rewrite-read-btn');
   if (readBtn) readBtn.style.display = doneCount ? '' : 'none';
 
   const body = $('rewrite-body');
   if (!chapters.length) {
-    body.innerHTML = '<div class="card meta">尚未导入原文。点「编辑设定」，在基本信息中粘贴或从文件导入已有小说原文。</div>';
+    body.innerHTML = `<div class="card meta">${t('尚未导入原文。点「编辑设定」，在基本信息中粘贴或从文件导入已有小说原文。')}</div>`;
     return;
   }
   body.innerHTML = chapters.map(c => {
@@ -4442,12 +4493,12 @@ function renderRewrite() {
     return `
     <div class="card rewrite-chapter-card" id="rewrite-card-${c.index}">
       <div class="row">
-        <span class="title">${esc(c.title || ('第' + c.index + '段'))}</span>
-        ${rewritten ? '<span class="badge">已改写</span>' : '<span class="meta">未改写</span>'}
-        <span class="meta">${c.word_count ? '约 ' + c.word_count + ' 字' : ''}</span>
+        <span class="title">${esc(c.title || t('第 {n} 段', { n: c.index }))}</span>
+        ${rewritten ? `<span class="badge">${t('已改写')}</span>` : `<span class="meta">${t('未改写')}</span>`}
+        <span class="meta">${c.word_count ? t('约 {n} 字', { n: c.word_count }) : ''}</span>
         <span class="spacer"></span>
-        <button class="btn" onclick="nav('#/novels/${n.id}/chapter/${c.index}')">查看/编辑</button>
-        <button class="btn primary" id="rewrite-btn-${c.index}" onclick="rewriteChapter(${c.index})">${rewritten ? '重新改写' : '改写本章'}</button>
+        <button class="btn" onclick="nav('#/novels/${n.id}/chapter/${c.index}')">${t('查看/编辑')}</button>
+        <button class="btn primary" id="rewrite-btn-${c.index}" onclick="rewriteChapter(${c.index})">${rewritten ? t('重新改写') : t('改写本章')}</button>
       </div>
       <div class="chapter-content" style="max-height:240px;overflow:auto">${esc(c.content || '')}</div>
     </div>`;
@@ -4462,7 +4513,7 @@ async function saveRewriteInstruction() {
       body: JSON.stringify({ task_instruction: instr }),
     });
     state.novel = d.novel;
-    toast('改写要求已保存', 'ok');
+    toast(t('改写要求已保存'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -4471,28 +4522,28 @@ async function rewriteChapter(index) {
   rewriteGenerating = true;
   const card = $('rewrite-card-' + index);
   const btn = $('rewrite-btn-' + index);
-  if (btn) { btn.disabled = true; btn.textContent = '改写中…'; }
+  if (btn) { btn.disabled = true; btn.textContent = t('改写中…'); }
 
   let out = null, badge = null;
   if (card) {
     card.insertAdjacentHTML('beforeend',
-      `<div class="gen-panel"><span class="badge gen-badge" id="rewrite-badge-${index}">生成中…</span><div class="gen-output" id="rewrite-out-${index}"></div></div>`);
+      `<div class="gen-panel"><span class="badge gen-badge" id="rewrite-badge-${index}">${t('生成中…')}</span><div class="gen-output" id="rewrite-out-${index}"></div></div>`);
     out = $('rewrite-out-' + index);
     badge = $('rewrite-badge-' + index);
   }
 
   let full = '';
   let received = false;
-  const waitTimer = setTimeout(() => { if (!received && badge) badge.textContent = '模型思考中…'; }, 9000);
+  const waitTimer = setTimeout(() => { if (!received && badge) badge.textContent = t('模型思考中…'); }, 9000);
 
   try {
     await streamApi(`/api/novels/${state.novel.id}/rewrite/stream`, (ev) => {
       if (ev.type === 'delta') {
-        if (!received) { received = true; clearTimeout(waitTimer); if (badge) badge.textContent = '生成中…'; }
+        if (!received) { received = true; clearTimeout(waitTimer); if (badge) badge.textContent = t('生成中…'); }
         full += ev.content;
         if (out) { out.textContent = full; out.scrollTop = out.scrollHeight; }
       } else if (ev.type === 'chapter_done') {
-        if (badge) badge.textContent = '正文完成，生成摘要…';
+        if (badge) badge.textContent = t('正文完成，生成摘要…');
       } else if (ev.type === 'done') {
         state.novel = ev.novel;
       } else if (ev.type === 'error') {
@@ -4506,28 +4557,28 @@ async function rewriteChapter(index) {
     rewriteGenerating = false;
   }
 
-  if (!received) toast('模型未返回内容，请重试', 'err');
-  else toast('本章改写完成', 'ok');
+  if (!received) toast(t('模型未返回内容，请重试'), 'err');
+  else toast(t('本章改写完成'), 'ok');
   renderRewrite();
 }
 
 async function rewriteAll() {
   const chapters = (state.novel.chapters || []).filter(c => !c.summary);
-  if (!chapters.length) { toast('所有章节均已改写', 'ok'); return; }
-  if (!confirm(`将依次改写 ${chapters.length} 个未改写章节，可能耗时较长，是否继续？`)) return;
+  if (!chapters.length) { toast(t('所有章节均已改写'), 'ok'); return; }
+  if (!confirm(t('将依次改写 {n} 个未改写章节，可能耗时较长，是否继续？', { n: chapters.length }))) return;
   for (const c of chapters) {
     await rewriteChapter(c.index);
   }
-  toast('全部改写完成', 'ok');
+  toast(t('全部改写完成'), 'ok');
 }
 
 async function resplitSource() {
-  if (!confirm('按当前原文重新切分章节，将丢弃已有的改写结果，确定？')) return;
+  if (!confirm(t('按当前原文重新切分章节，将丢弃已有的改写结果，确定？'))) return;
   try {
     const d = await api('/api/novels/' + state.novel.id + '/resplit', { method: 'POST' });
     state.novel = d.novel;
     renderRewrite();
-    toast('已按原文重新切分', 'ok');
+    toast(t('已按原文重新切分'), 'ok');
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -4537,7 +4588,7 @@ async function openContinuePage(id) {
     const d = await api('/api/novels/' + id);
     state.novel = d.novel;
     currentNovelId = id;
-    $('continue-title').textContent = '《' + (state.novel.title || '未命名') + '》 续写创作';
+    $('continue-title').textContent = `《${state.novel.title || t('未命名')}》 ${t('续写创作')}`;
     const editLink = $('continue-edit-link');
     if (editLink) editLink.setAttribute('href', '#/novels/' + id + '/edit');
     renderContinue();
@@ -4554,7 +4605,7 @@ function renderContinue() {
   const source = n.source_text || '';
 
   const hint = $('continue-chapter-hint');
-  if (hint) hint.textContent = chapters.length ? `已续写 ${chapters.length} 章，接下来写第 ${chapters.length + 1} 章` : '接下来写第 1 章';
+  if (hint) hint.textContent = chapters.length ? t('已续写 {n} 章，接下来写第 {m} 章', { n: chapters.length, m: chapters.length + 1 }) : t('接下来写第 {n} 章', { n: 1 });
   const readBtn = $('continue-read-btn');
   if (readBtn) readBtn.style.display = chapters.length ? '' : 'none';
 
@@ -4563,7 +4614,7 @@ function renderContinue() {
     if (source) {
       srcBox.style.display = 'block';
       const tail = source.length > 600 ? '……' + source.slice(-600) : source;
-      srcBox.innerHTML = `<div class="row"><span class="title">📄 已导入原文（结尾摘录）</span><span class="spacer"></span><span class="meta">共 ${source.length} 字</span></div><div class="chapter-content" style="max-height:200px;overflow:auto">${esc(tail)}</div>`;
+      srcBox.innerHTML = `<div class="row"><span class="title">📄 ${t('已导入原文（结尾摘录）')}</span><span class="spacer"></span><span class="meta">${t('共 {n} 字', { n: source.length })}</span></div><div class="chapter-content" style="max-height:200px;overflow:auto">${esc(tail)}</div>`;
     } else {
       srcBox.style.display = 'none';
     }
@@ -4571,18 +4622,18 @@ function renderContinue() {
 
   const body = $('continue-body');
   if (!chapters.length) {
-    body.innerHTML = '<div class="card meta">还没有续写内容。在上方填写本章续写要求，点击「续写下一章」开始。</div>';
+    body.innerHTML = `<div class="card meta">${t('还没有续写内容。在上方填写本章续写要求，点击「续写下一章」开始。')}</div>`;
     return;
   }
   body.innerHTML = chapters.map(c => `
     <div class="card continue-chapter-card">
       <div class="row">
-        <span class="title">${esc(c.title || ('第' + c.index + '章'))}</span>
-        <span class="meta">约 ${c.word_count || ''} 字</span>
+        <span class="title">${esc(c.title || t('第 {n} 章', { n: c.index }))}</span>
+        <span class="meta">${t('约 {n} 字', { n: c.word_count || '' })}</span>
         <span class="spacer"></span>
-        <button class="btn" onclick="nav('#/novels/${n.id}/chapter/${c.index}')">查看/编辑正文</button>
+        <button class="btn" onclick="nav('#/novels/${n.id}/chapter/${c.index}')">${t('查看/编辑正文')}</button>
       </div>
-      ${c.instruction ? `<div class="improv-instruction-hint">📝 本章续写要求：${esc(c.instruction)}</div>` : ''}
+      ${c.instruction ? `<div class="improv-instruction-hint">📝 ${t('本章续写要求')}：${esc(c.instruction)}</div>` : ''}
       <div class="chapter-content" style="max-height:300px;overflow:auto">${esc(c.content)}</div>
     </div>`).join('');
 }
@@ -4590,13 +4641,13 @@ function renderContinue() {
 async function generateContinueChapter() {
   if (continueGenerating) return;
   const instruction = $('continue-instruction').value.trim();
-  if (!instruction) return toast('请填写本章续写要求', 'err');
-  if (!(state.novel.source_text || '').trim()) return toast('尚未导入原文，请先到「编辑设定」导入', 'err');
+  if (!instruction) return toast(t('请填写本章续写要求'), 'err');
+  if (!(state.novel.source_text || '').trim()) return toast(t('尚未导入原文，请先到「编辑设定」导入'), 'err');
 
   continueGenerating = true;
   const btn = $('continue-gen-btn');
   btn.disabled = true;
-  btn.textContent = '生成中…';
+  btn.textContent = t('生成中…');
   $('continue-instruction').disabled = true;
 
   const body = $('continue-body');
@@ -4604,8 +4655,8 @@ async function generateContinueChapter() {
   body.insertAdjacentHTML('afterbegin', `
     <div class="card gen-panel" id="${panelId}">
       <div class="row">
-        <span class="title">新章节生成中</span>
-        <span class="badge gen-badge" id="${panelId}-badge">生成中…</span>
+        <span class="title">${t('新章节生成中')}</span>
+        <span class="badge gen-badge" id="${panelId}-badge">${t('生成中…')}</span>
         <span class="spacer"></span>
         <span class="meta" id="${panelId}-words"></span>
       </div>
@@ -4617,17 +4668,17 @@ async function generateContinueChapter() {
 
   let full = '';
   let received = false;
-  const waitTimer = setTimeout(() => { if (!received && badge) badge.textContent = '模型思考中…'; }, 9000);
+  const waitTimer = setTimeout(() => { if (!received && badge) badge.textContent = t('模型思考中…'); }, 9000);
 
   try {
     await streamApi(`/api/novels/${state.novel.id}/continue/stream`, (ev) => {
       if (ev.type === 'delta') {
-        if (!received) { received = true; clearTimeout(waitTimer); if (badge) badge.textContent = '生成中…'; }
+        if (!received) { received = true; clearTimeout(waitTimer); if (badge) badge.textContent = t('生成中…'); }
         full += ev.content;
         if (out) { out.textContent = full; out.scrollTop = out.scrollHeight; }
       } else if (ev.type === 'chapter_done') {
-        if (wordsEl) wordsEl.textContent = `约 ${ev.word_count || 0} 字`;
-        if (badge) badge.textContent = '正文完成，生成摘要…';
+        if (wordsEl) wordsEl.textContent = t('约 {n} 字', { n: ev.word_count || 0 });
+        if (badge) badge.textContent = t('正文完成，生成摘要…');
       } else if (ev.type === 'done') {
         state.novel = ev.novel;
       } else if (ev.type === 'error') {
@@ -4642,12 +4693,12 @@ async function generateContinueChapter() {
     clearTimeout(waitTimer);
     continueGenerating = false;
     btn.disabled = false;
-    btn.textContent = '续写下一章';
+    btn.textContent = t('续写下一章');
     $('continue-instruction').disabled = false;
   }
 
   if (!received) {
-    toast('模型未返回内容，请重试', 'err');
+    toast(t('模型未返回内容，请重试'), 'err');
     $(panelId).remove();
     return;
   }
@@ -4655,7 +4706,7 @@ async function generateContinueChapter() {
   $(panelId).remove();
   $('continue-instruction').value = '';
   renderContinue();
-  toast('本章续写完成', 'ok');
+  toast(t('本章续写完成'), 'ok');
 }
 
 // ===== 原著结构化拆解（续写模式） =====
@@ -4684,45 +4735,45 @@ function profileHTML(profile) {
   const sm = profile.summary || {};
 
   const charCards = chars.length ? `
-    <h4 class="profile-h4">👥 人物档案（${chars.length}）</h4>
+    <h4 class="profile-h4">👥 ${t('人物档案（{n}）', { n: chars.length })}</h4>
     <div class="profile-char-grid">${chars.map(c => `
       <div class="card profile-char">
-        <div class="row"><span class="title">👤 ${esc(c.name || '未命名')}</span></div>
-        ${profileVal(c.core_personality) ? `<div class="meta"><b>核心性格</b>：${esc(profileVal(c.core_personality))}</div>` : ''}
-        ${profileVal(c.speaking_style) ? `<div class="meta"><b>说话风格</b>：${esc(profileVal(c.speaking_style))}</div>` : ''}
-        ${profileVal(c.key_history) ? `<div class="meta"><b>重大经历</b>：${esc(profileVal(c.key_history))}</div>` : ''}
-        ${profileVal(c.relationship) ? `<div class="meta"><b>人物关系</b>：${esc(profileVal(c.relationship))}</div>` : ''}
-        ${profileVal(c.current_state) ? `<div class="meta"><b>当前状态</b>：${esc(profileVal(c.current_state))}</div>` : ''}
-        ${profileVal(c.taboo) ? `<div class="meta"><b>🚫 行为禁忌</b>：${esc(profileVal(c.taboo))}</div>` : ''}
+        <div class="row"><span class="title">👤 ${esc(c.name || t('未命名'))}</span></div>
+        ${profileVal(c.core_personality) ? `<div class="meta"><b>${t('核心性格')}</b>：${esc(profileVal(c.core_personality))}</div>` : ''}
+        ${profileVal(c.speaking_style) ? `<div class="meta"><b>${t('说话风格')}</b>：${esc(profileVal(c.speaking_style))}</div>` : ''}
+        ${profileVal(c.key_history) ? `<div class="meta"><b>${t('重大经历')}</b>：${esc(profileVal(c.key_history))}</div>` : ''}
+        ${profileVal(c.relationship) ? `<div class="meta"><b>${t('人物关系')}</b>：${esc(profileVal(c.relationship))}</div>` : ''}
+        ${profileVal(c.current_state) ? `<div class="meta"><b>${t('当前状态')}</b>：${esc(profileVal(c.current_state))}</div>` : ''}
+        ${profileVal(c.taboo) ? `<div class="meta"><b>🚫 ${t('行为禁忌')}</b>：${esc(profileVal(c.taboo))}</div>` : ''}
       </div>`).join('')}</div>` : '';
 
   const wsRows = [
-    ['🌍 世界规则', profileVal(ws.world_rules)],
-    ['🗺️ 重要地域', profileVal(ws.geography)],
-    ['⚔️ 各大势力', profileVal(ws.forces)],
-    ['📖 专有名词', profileVal(ws.noun_glossary)],
+    ['🌍 ' + t('世界规则'), profileVal(ws.world_rules)],
+    ['🗺️ ' + t('重要地域'), profileVal(ws.geography)],
+    ['⚔️ ' + t('各大势力'), profileVal(ws.forces)],
+    ['📖 ' + t('专有名词'), profileVal(ws.noun_glossary)],
   ].filter(x => x[1]).map(x => `<div class="meta"><b>${x[0]}</b>：${esc(x[1])}</div>`).join('');
-  const wsCard = wsRows ? `<h4 class="profile-h4">🌐 世界观设定</h4><div class="card profile-block">${wsRows}</div>` : '';
+  const wsCard = wsRows ? `<h4 class="profile-h4">🌐 ${t('世界观设定')}</h4><div class="card profile-block">${wsRows}</div>` : '';
 
   const fg = Array.isArray(mf.foreshadowing_list) ? mf.foreshadowing_list : [];
   const fgList = fg.length ? `<ul class="profile-list">${fg.map(x => `<li>${esc(profileVal(x))}</li>`).join('')}</ul>` : '';
   const mfRows = [
-    ['🎯 核心主题', profileVal(mf.core_theme)],
-    ['🏁 主角长期目标', profileVal(mf.protagonist_goal)],
-    ['💥 核心矛盾', profileVal(mf.main_conflict)],
-    ['🎭 文风基调', profileVal(mf.story_tone)],
+    ['🎯 ' + t('核心主题'), profileVal(mf.core_theme)],
+    ['🏁 ' + t('主角长期目标'), profileVal(mf.protagonist_goal)],
+    ['💥 ' + t('核心矛盾'), profileVal(mf.main_conflict)],
+    ['🎭 ' + t('文风基调'), profileVal(mf.story_tone)],
   ].filter(x => x[1]).map(x => `<div class="meta"><b>${x[0]}</b>：${esc(x[1])}</div>`).join('');
   const mfCard = (mfRows || fgList) ? `
-    <h4 class="profile-h4">🧭 主线框架</h4>
-    <div class="card profile-block">${mfRows}${fg.length ? `<div class="meta"><b>📌 待回收伏笔</b></div>${fgList}` : ''}</div>` : '';
+    <h4 class="profile-h4">🧭 ${t('主线框架')}</h4>
+    <div class="card profile-block">${mfRows}${fg.length ? `<div class="meta"><b>📌 ${t('待回收伏笔')}</b></div>${fgList}` : ''}</div>` : '';
 
   const chSummaries = Array.isArray(sm.chapter_summaries) ? sm.chapter_summaries : [];
   const chList = chSummaries.length ? `
-    <h4 class="profile-h4">📑 章节脉络（${chSummaries.length}）</h4>
+    <h4 class="profile-h4">📑 ${t('章节脉络（{n}）', { n: chSummaries.length })}</h4>
     <div class="card profile-block"><div class="profile-ch-grid">${chSummaries.map(cs => `
       <div class="profile-ch"><span class="badge">${esc(profileVal(cs.chapter))}</span><span class="meta">${esc(profileVal(cs.brief))}</span></div>`).join('')}</div></div>` : '';
 
-  const smCard = (profileVal(sm.full_outline) ? `<h4 class="profile-h4">📜 全书脉络摘要</h4><div class="card profile-block"><div class="chapter-content">${esc(profileVal(sm.full_outline))}</div></div>` : '') + chList;
+  const smCard = (profileVal(sm.full_outline) ? `<h4 class="profile-h4">📜 ${t('全书脉络摘要')}</h4><div class="card profile-block"><div class="chapter-content">${esc(profileVal(sm.full_outline))}</div></div>` : '') + chList;
 
   return charCards + wsCard + mfCard + smCard;
 }
@@ -4742,7 +4793,7 @@ async function analyzeSourceText(source) {
     }
   }, { source_text: source, text_model_id: ($('n-model') ? $('n-model').value : '') });
   if (err) throw err;
-  if (!profile) throw new Error('未收到拆解结果，请重试');
+  if (!profile) throw new Error(t('未收到拆解结果，请重试'));
   return profile;
 }
 
@@ -4773,24 +4824,24 @@ function renderWizardAnalyzeBox() {
   if (profile && Object.keys(profile).length) {
     box.innerHTML = `
       <div class="row" style="margin-bottom:10px">
-        <span class="badge">✅ 已拆解</span>
+        <span class="badge">✅ ${t('已拆解')}</span>
         <span class="spacer"></span>
-        <button class="btn" onclick="analyzeInWizard()">🔄 重新拆解</button>
+        <button class="btn" onclick="analyzeInWizard()">🔄 ${t('重新拆解')}</button>
       </div>
       ${profileHTML(profile)}`;
   } else {
-    box.innerHTML = '<button class="btn primary" id="wizard-analyze-btn" onclick="analyzeInWizard()">🧠 开始拆解原著</button>';
+    box.innerHTML = `<button class="btn primary" id="wizard-analyze-btn" onclick="analyzeInWizard()">🧠 ${t('开始拆解原著')}</button>`;
   }
 }
 
 // 编辑页向导：在第二步手动触发原著拆解
 async function analyzeInWizard() {
   const source = ($('n-source').value || '').trim();
-  if (!source) return toast('请先在第一步导入原文', 'err');
+  if (!source) return toast(t('请先在第一步导入原文'), 'err');
   if (editorAnalyzing) return;
   editorAnalyzing = true;
   const box = $('wizard-analyze-box');
-  if (box) box.innerHTML = '<div class="meta" id="wizard-analyze-progress" style="margin-top:10px">AI 正在通读全文，提取人物档案、世界观、主线框架与伏笔…</div>';
+  if (box) box.innerHTML = `<div class="meta" id="wizard-analyze-progress" style="margin-top:10px">${t('AI 正在通读全文，提取人物档案、世界观、主线框架与伏笔…')}</div>`;
   try {
     state.novelProfileSource = source;
     state.novelProfile = await analyzeSourceText(source);
@@ -4803,10 +4854,10 @@ async function analyzeInWizard() {
         });
         state.novel = d.novel;
       } catch (e) {
-        toast('档案已生成，但自动保存失败：' + e.message + '（请点击「保存基本信息」手动保存）', 'err');
+        toast(t('档案已生成，但自动保存失败：') + e.message + t('（请点击「保存基本信息」手动保存）'), 'err');
       }
     }
-    toast('原著拆解完成', 'ok');
+    toast(t('原著拆解完成'), 'ok');
   } catch (e) {
     toast(e.message, 'err');
     state.novelProfile = null;
@@ -4830,15 +4881,15 @@ function renderAnalyzedCharacters() {
   const top = profile.characters.slice(0, 5);
   box.innerHTML = `
     <div class="card" style="margin-bottom:16px">
-      <div class="row"><span class="title">🧠 AI 拆解主要角色（前 ${top.length} 位）</span></div>
+      <div class="row"><span class="title">🧠 ${t('AI 拆解主要角色（前 {n} 位）', { n: top.length })}</span></div>
       <div class="profile-char-grid" style="margin-top:10px">
         ${top.map(c => `
           <div class="card profile-char">
-            <div class="row"><span class="title">👤 ${esc(c.name || '未命名')}</span></div>
-            ${profileVal(c.core_personality) ? `<div class="meta"><b>核心性格</b>：${esc(profileVal(c.core_personality))}</div>` : ''}
-            ${profileVal(c.speaking_style) ? `<div class="meta"><b>说话风格</b>：${esc(profileVal(c.speaking_style))}</div>` : ''}
-            ${profileVal(c.relationship) ? `<div class="meta"><b>人物关系</b>：${esc(profileVal(c.relationship))}</div>` : ''}
-            ${profileVal(c.current_state) ? `<div class="meta"><b>当前状态</b>：${esc(profileVal(c.current_state))}</div>` : ''}
+            <div class="row"><span class="title">👤 ${esc(c.name || t('未命名'))}</span></div>
+            ${profileVal(c.core_personality) ? `<div class="meta"><b>${t('核心性格')}</b>：${esc(profileVal(c.core_personality))}</div>` : ''}
+            ${profileVal(c.speaking_style) ? `<div class="meta"><b>${t('说话风格')}</b>：${esc(profileVal(c.speaking_style))}</div>` : ''}
+            ${profileVal(c.relationship) ? `<div class="meta"><b>${t('人物关系')}</b>：${esc(profileVal(c.relationship))}</div>` : ''}
+            ${profileVal(c.current_state) ? `<div class="meta"><b>${t('当前状态')}</b>：${esc(profileVal(c.current_state))}</div>` : ''}
           </div>`).join('')}
       </div>
     </div>`;
@@ -4893,7 +4944,7 @@ function onLocaleChanged() {
     await router();
   } catch (e) {
     if (authToken) {
-      toast('初始化失败：' + e.message, 'err');
+      toast(t('初始化失败：') + e.message, 'err');
     }
   }
 })();

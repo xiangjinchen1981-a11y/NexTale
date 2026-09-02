@@ -2,7 +2,7 @@
 import json
 import re
 
-from ai_client import chat_text, chat_text_stream, chat_vision, AIClientError
+from ai_client import chat_text, chat_text_stream, chat_vision, generate_image, AIClientError
 
 def _uid(context):
     """从 context 提取 user_id（用于日志归属）。"""
@@ -15,8 +15,9 @@ from prompts import get_prompt
 def _resolve(context, role):
     """解析当前指定使用的模型，返回 (provider, model_name, model_config)。
 
-    role 为 "text" 或 "vision"，根据 settings 中的 text_model_id / vision_model_id
-    在所有服务商的 models 列表里定位模型条目；model_config 含 type/temperature/max_tokens。
+    role 为 "text"、"vision" 或 "image"，根据 settings 中的
+    text_model_id / vision_model_id / image_model_id 在所有服务商的 models
+    列表里定位模型条目；model_config 含 type/temperature/max_tokens。
     """
     settings = context["settings"]
     providers = context["providers"]
@@ -25,7 +26,7 @@ def _resolve(context, role):
         for m in p.get("models", []):
             if m.get("id") == model_id:
                 return p, m.get("name", "").strip(), m
-    label = "视觉分析" if role == "vision" else "文本生成"
+    label = {"vision": "视觉分析", "image": "图片生成"}.get(role, "文本生成")
     raise AIClientError(
         f"未指定{label}使用的模型，请在「API 配置」页为服务商添加模型并点「设为当前」。"
     )
@@ -93,6 +94,13 @@ def analyze_photo(context, image_base64):
                              temperature=_temperature(context, mcfg), name="分析照片", user_id=_uid(context))
     appearance, personality = _parse_two_fields(content)
     return {"appearance": appearance, "personality": personality}
+
+
+def generate_character_photo(context, prompt):
+    """用图片生成模型按提示词生成角色照片，返回图片字节。"""
+    provider, model, _mcfg = _resolve(context, "image")
+    return generate_image(provider, model, prompt,
+                          name="生成角色照片", user_id=_uid(context))
 
 
 def analyze_style(context, reference_text):

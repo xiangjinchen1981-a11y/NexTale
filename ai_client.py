@@ -5,6 +5,8 @@
 """
 from openai import OpenAI
 from httpx2 import Client as HttpxClient
+import base64
+import re
 import time
 
 # 常见服务商 base_url 参考（用户可在界面自定义覆盖）
@@ -230,6 +232,110 @@ def chat_vision(provider, model, prompt, image_base64, temperature=0.5, max_toke
         raise AIClientError(_friendly_error(e)) from e
 
 
+def _http_client(provider, timeout=300.0):
+    """按服务商代理策略构造原生 httpx 客户端（用于非 chat 接口，如文生图）。"""
+    proxy = (provider.get("proxy") or "").strip()
+    if proxy in ("", "direct"):
+        return HttpxClient(trust_env=False, timeout=timeout)
+    if proxy == "system":
+        return HttpxClient(trust_env=True, timeout=timeout)
+    return HttpxClient(proxy=proxy, trust_env=False, timeout=timeout)
+
+
+def generate_image(provider, model, prompt, size="1024*1024", name="", user_id=""):
+    """文生图，返回图片字节。
+
+    按 base_url 自动选择协议：
+    - 百炼（dashscope）：原生异步任务接口（text2image），轮询任务状态后下载图片；
+    - 其他 OpenAI 兼容服务商：调用 /images/generations。
+    """
+    start = time.time()
+    try:
+        base = (provider.get("base_url") or "").strip().lower()
+        if "dashscope" in base:
+            data = _gen_image_dashscope(provider, model, prompt, size)
+        else:
+            data = _gen_image_openai(provider, model, prompt, size)
+        _log_request("image", provider, model, prompt,
+                     status="ok", elapsed=time.time() - start, name=name, user_id=user_id)
+        return data
+    except AIClientError as e:
+        _log_request("image", provider, model, prompt,
+                     status="error", elapsed=time.time() - start, error=str(e), name=name, user_id=user_id)
+        raise
+    except Exception as e:  # noqa: BLE001
+        _log_request("image", provider, model, prompt,
+                     status="error", elapsed=time.time() - start, error=str(e), name=name, user_id=user_id)
+        raise AIClientError(_friendly_error(e)) from e
+
+
+def _gen_image_dashscope(provider, model, prompt, size):
+    """百炼原生文生图：提交异步任务 → 轮询任务状态 → 下载图片。"""
+    m = re.match(r"(https?://[^/]+)", (provider.get("base_url") or "").strip())
+    root = m.group(1) if m else "https://dashscope.aliyuncs.com"
+    api_key = provider.get("api_key", "")
+    headers = {"Authorization": f"Bearer {api_key}", "X-DashScope-Async": "enable"}
+    body = {
+        "model": model,
+        "input": {"prompt": prompt},
+        "parameters": {"size": size, "n": 1},
+    }
+    with _http_client(provider) as client:
+        r = client.post(root + "/api/v1/services/aigc/text2image/image-synthesis",
+                        headers=headers, json=body)
+        if r.status_code >= 400:
+            raise Exception(f"{r.status_code} {r.text[:300]}")
+        task_id = (r.json().get("output") or {}).get("task_id")
+        if not task_id:
+            raise Exception("百炼未返回 task_id：" + r.text[:200])
+
+        deadline = time.time() + 300
+        while time.time() < deadline:
+            time.sleep(2)
+            tr = client.get(root + f"/api/v1/tasks/{task_id}",
+                            headers={"Authorization": f"Bearer {api_key}"})
+            out = (tr.json() or {}).get("output") or {}
+            status = out.get("task_status")
+            if status == "SUCCEEDED":
+                results = out.get("results") or []
+                item = results[0] if results else {}
+                if item.get("url"):
+                    img = client.get(item["url"])
+                    if img.status_code >= 400:
+                        raise Exception(f"图片下载失败：{img.status_code}")
+                    return img.content
+                if item.get("b64_image"):
+                    return base64.b64decode(item["b64_image"])
+                raise Exception("百炼返回的图片结果缺少数据：" + str(out)[:200])
+            if status in ("FAILED", "UNKNOWN"):
+                raise Exception(f"百炼生图任务失败：{out.get('message') or out.get('code') or status}")
+        raise Exception("百炼生图任务超时（300 秒），请稍后重试")
+
+
+def _gen_image_openai(provider, model, prompt, size):
+    """OpenAI 兼容文生图：POST /images/generations，支持 url 或 b64_json 两种返回。"""
+    base = (provider.get("base_url") or "").rstrip("/")
+    body = {"model": model, "prompt": prompt, "size": size.replace("*", "x"), "n": 1}
+    with _http_client(provider) as client:
+        r = client.post(base + "/images/generations",
+                        headers={"Authorization": f"Bearer {provider.get('api_key', '')}"},
+                        json=body)
+        if r.status_code >= 400:
+            raise Exception(f"{r.status_code} {r.text[:300]}")
+        data = (r.json() or {}).get("data") or []
+        if not data:
+            raise Exception("图片生成接口未返回结果")
+        item = data[0]
+        if item.get("b64_json"):
+            return base64.b64decode(item["b64_json"])
+        if item.get("url"):
+            img = client.get(item["url"])
+            if img.status_code >= 400:
+                raise Exception(f"图片下载失败：{img.status_code}")
+            return img.content
+        raise Exception("图片生成接口未返回图片数据")
+
+
 def list_models(provider):
     """拉取服务商的模型列表，返回去重排序后的模型 id 列表。"""
     try:
@@ -240,9 +346,13 @@ def list_models(provider):
         raise AIClientError(_friendly_error(e)) from e
 
 
-def test_connection(provider, model, vision=False):
+def test_connection(provider, model, vision=False, image=False):
     """测试连通性，返回 (ok, message)。"""
     try:
+        if image:
+            # 图片模型：实际生成一张小图验证（会消耗少量额度）
+            generate_image(provider, model, "a cute orange cat")
+            return True, f"连接成功（{model}）"
         if vision:
             # 视觉测试用 1x1 纯色占位图
             tiny = (
