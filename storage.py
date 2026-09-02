@@ -25,6 +25,10 @@ DEFAULT_SETTINGS = {
     # 每 100 目标字数对应的 max_tokens 安全系数
     "token_ratio": 1.6,
     "temperature": 0.8,
+    # 最大输出 token 数（None 表示按字数自动估算）
+    "max_tokens": None,
+    # 模型上下文窗口长度（token），用于截断超长输入（None 表示不截断）
+    "context_length": None,
     # 全局前置提示词：附加到所有生成请求，统一约束创作方向
     "global_prompt": "",
     # 各功能提示词模板（key -> 模板文本），空 dict 表示全部使用默认

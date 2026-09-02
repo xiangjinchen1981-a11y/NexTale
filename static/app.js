@@ -12,7 +12,7 @@ let state = {
   editingProviderId: null,
   editingModel: null,
   modelLists: {},
-  addModelOpen: null,
+  modelFormPid: null,  // 模型弹窗对应的服务商 id
   editingGenreId: null, // 正在编辑的题材 id
 };
 
@@ -711,7 +711,6 @@ function renderProviders() {
     ? state.providers.map(p => {
         const models = p.models || [];
         const list = state.modelLists[p.id] || [];
-        const open = state.addModelOpen === p.id;
         const modelsHtml = models.map(m => {
           const isText = s.text_model_id === m.id;
           const isVision = s.vision_model_id === m.id;
@@ -752,50 +751,89 @@ function renderProviders() {
           <div class="row" style="margin:10px 0 6px">
             <span class="meta"><b>${t('模型')}（${models.length}）</b></span>
             <span class="spacer"></span>
-            <button class="btn" onclick="toggleAddModel('${p.id}')">${open ? t('收起') : '＋ ' + t('添加模型')}</button>
+            <button class="btn" onclick="openModelForm('${p.id}')">＋ ${t('添加模型')}</button>
           </div>
           ${modelsHtml || `<div class="meta" style="margin:4px 0">${t('暂无模型，先「连接」拉取列表再添加。')}</div>`}
-          ${renderModelForm(p, open)}
         </div>
       </div>`;
       }).join('')
-    : `<div class="card meta">${t('暂无服务商，请在下方添加。')}</div>`;
+    : `<div class="card meta">${t('暂无服务商，请点击上方「添加服务商」。')}</div>`;
 }
 
-function renderModelForm(p, open) {
-  const pid = p.id;
-  const editing = state.editingModel && state.editingModel.pid === pid ? state.editingModel : null;
-  const model = editing ? (p.models || []).find(m => m.id === editing.mid) : null;
+// 打开模型添加弹窗
+function openModelForm(pid) {
+  state.modelFormPid = pid;
+  state.editingModel = null;
+  $('mf-name').value = '';
+  const radio = document.querySelector('input[name="mf-type"][value="text"]');
+  if (radio) radio.checked = true;
+  fillModelDatalist(pid);
+  $('model-form-title').textContent = t('添加模型');
+  $('btn-model-save').textContent = t('保存模型');
+  const ov = $('model-overlay');
+  if (ov) ov.classList.add('show');
+}
+
+// 填充模型名的 datalist（来自连接缓存）
+function fillModelDatalist(pid) {
+  const dl = $('mf-dl');
+  if (!dl) return;
   const list = state.modelLists[pid] || [];
-  const dlId = 'dl-' + pid;
-  const mtype = model ? (model.type || 'text') : 'text';
-  return `
-    <div id="model-form-${pid}" style="${open ? '' : 'display:none'}" class="model-form">
-      <datalist id="${dlId}">${list.map(m => `<option value="${esc(m)}"></option>`).join('')}</datalist>
-      <div class="form-grid">
-        <label>${t('模型名')}
-          <input id="mf-name-${pid}" list="${dlId}" placeholder="${t('连接后从列表选择，也可手输')}" value="${esc(model ? model.name : '')}">
-        </label>
-        <label>${t('类型')}
-          <span class="radio-group">
-            <label class="radio-inline"><input type="radio" name="mf-type-${pid}" value="text" ${mtype === 'text' ? 'checked' : ''}> ${t('文本')}</label>
-            <label class="radio-inline"><input type="radio" name="mf-type-${pid}" value="vision" ${mtype === 'vision' ? 'checked' : ''}> ${t('视觉')}</label>
-            <label class="radio-inline"><input type="radio" name="mf-type-${pid}" value="image" ${mtype === 'image' ? 'checked' : ''}> ${t('图片')}</label>
-          </span>
-        </label>
-        <label>${t('temperature（可选，留空用全局）')}
-          <input id="mf-temp-${pid}" type="number" step="0.1" min="0" max="1.5" placeholder="${t('如 0.8')}" value="${model && model.temperature != null ? model.temperature : ''}">
-        </label>
-        <label>${t('max_tokens（可选，留空按字数自动）')}
-          <input id="mf-max-${pid}" type="number" min="1" placeholder="${t('如 4096')}" value="${model && model.max_tokens ? model.max_tokens : ''}">
-        </label>
-        <label>${t('上下文长度 context_length（可选，超长输入会自动截断）')}
-          <input id="mf-ctx-${pid}" type="number" min="1024" step="1024" placeholder="${t('如 32768 / 128000')}" value="${model && model.context_length ? model.context_length : ''}">
-        </label>
-      </div>
-      <button class="btn primary" onclick="saveModel('${pid}')">${model ? t('保存模型修改') : t('保存模型')}</button>
-      <button class="btn" onclick="closeModelForm('${pid}')">${t('取消')}</button>
-    </div>`;
+  dl.innerHTML = list.map(m => `<option value="${esc(m)}"></option>`).join('');
+}
+
+// 关闭模型弹窗
+function closeModelForm() {
+  const ov = $('model-overlay');
+  if (ov) ov.classList.remove('show');
+  state.modelFormPid = null;
+  state.editingModel = null;
+}
+
+// 编辑模型：填充弹窗并打开
+function editModel(pid, mid) {
+  const p = state.providers.find(x => x.id === pid);
+  if (!p) return;
+  const m = (p.models || []).find(x => x.id === mid);
+  if (!m) return;
+  state.modelFormPid = pid;
+  state.editingModel = { pid, mid };
+  $('mf-name').value = m.name || '';
+  const type = m.type || 'text';
+  const radio = document.querySelector(`input[name="mf-type"][value="${type}"]`);
+  if (radio) radio.checked = true;
+  fillModelDatalist(pid);
+  $('model-form-title').textContent = t('编辑模型');
+  $('btn-model-save').textContent = t('保存模型修改');
+  const ov = $('model-overlay');
+  if (ov) ov.classList.add('show');
+}
+
+// 保存模型（读取弹窗字段）
+async function saveModelForm() {
+  const pid = state.modelFormPid;
+  if (!pid) return;
+  const name = $('mf-name').value.trim();
+  if (!name) return toast(t('请填写模型名'), 'err');
+  const checked = document.querySelector('input[name="mf-type"]:checked');
+  const type = checked ? checked.value : 'text';
+  // 其余参数（temperature / max_tokens / context_length）不在此配置，统一使用全局默认
+  const body = { name, type };
+  try {
+    if (state.editingModel && state.editingModel.pid === pid) {
+      await api(`/api/providers/${pid}/models/${state.editingModel.mid}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      toast(t('模型已更新'), 'ok');
+    } else {
+      await api(`/api/providers/${pid}/models`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      toast(t('模型已添加'), 'ok');
+    }
+    closeModelForm();
+    await loadProviders();
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 async function connectProvider(pid) {
@@ -832,62 +870,6 @@ async function connectProvider(pid) {
   renderProviders();
 }
 
-function toggleAddModel(pid) {
-  if (state.addModelOpen === pid) {
-    state.addModelOpen = null;
-    state.editingModel = null;
-  } else {
-    state.addModelOpen = pid;
-    state.editingModel = null;
-  }
-  renderProviders();
-}
-
-function editModel(pid, mid) {
-  state.addModelOpen = pid;
-  state.editingModel = { pid, mid };
-  renderProviders();
-}
-
-function closeModelForm(pid) {
-  state.addModelOpen = null;
-  state.editingModel = null;
-  renderProviders();
-}
-
-async function saveModel(pid) {
-  const name = $('mf-name-' + pid).value.trim();
-  if (!name) return toast(t('请填写模型名'), 'err');
-  const checked = document.querySelector(`input[name="mf-type-${pid}"]:checked`);
-  const type = checked ? checked.value : 'text';
-  const tempVal = $('mf-temp-' + pid).value.trim();
-  const maxVal = $('mf-max-' + pid).value.trim();
-  const ctxVal = $('mf-ctx-' + pid).value.trim();
-  const body = {
-    name,
-    type,
-    temperature: tempVal === '' ? null : parseFloat(tempVal),
-    max_tokens: maxVal === '' ? null : parseInt(maxVal),
-    context_length: ctxVal === '' ? null : parseInt(ctxVal),
-  };
-  try {
-    if (state.editingModel && state.editingModel.pid === pid) {
-      await api(`/api/providers/${pid}/models/${state.editingModel.mid}`, {
-        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-      });
-      toast(t('模型已更新'), 'ok');
-    } else {
-      await api(`/api/providers/${pid}/models`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-      });
-      toast(t('模型已添加'), 'ok');
-    }
-    state.addModelOpen = null;
-    state.editingModel = null;
-    await loadProviders();
-  } catch (e) { toast(e.message, 'err'); }
-}
-
 async function deleteModel(pid, mid) {
   if (!confirm(t('确定删除该模型？'))) return;
   await api(`/api/providers/${pid}/models/${mid}`, { method: 'DELETE' });
@@ -921,6 +903,24 @@ async function setModelRole(pid, mid, role) {
   } catch (e) { toast(e.message, 'err'); }
 }
 
+// 打开服务商添加弹窗
+function openProviderForm() {
+  state.editingProviderId = null;
+  ['p-name', 'p-base', 'p-key', 'p-proxy-url'].forEach(i => $(i).value = '');
+  $('p-proxy').value = 'direct';
+  $('provider-form-title').textContent = t('添加服务商');
+  $('btn-provider-save').textContent = t('保存');
+  const ov = $('provider-overlay');
+  if (ov) ov.classList.add('show');
+}
+
+// 关闭服务商弹窗
+function closeProviderForm() {
+  const ov = $('provider-overlay');
+  if (ov) ov.classList.remove('show');
+  state.editingProviderId = null;
+}
+
 async function saveProviderForm() {
   const body = {
     name: $('p-name').value.trim(),
@@ -941,7 +941,7 @@ async function saveProviderForm() {
       });
       toast(t('服务商已添加'), 'ok');
     }
-    resetProviderForm();
+    closeProviderForm();
     await loadProviders();
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -955,23 +955,18 @@ function startEditProvider(id) {
   $('p-key').value = p.api_key || '';
   $('p-proxy').value = (p.proxy && p.proxy !== 'direct' && p.proxy !== 'system') ? 'custom' : (p.proxy || 'direct');
   $('p-proxy-url').value = (p.proxy && p.proxy !== 'direct' && p.proxy !== 'system') ? p.proxy : '';
-  $('provider-form-title').textContent = t('编辑服务商') + '：' + p.name;
+  $('provider-form-title').textContent = t('编辑服务商');
   $('btn-provider-save').textContent = t('保存修改');
-  $('btn-provider-cancel').style.display = '';
-  $('provider-form-title').scrollIntoView({ behavior: 'smooth' });
+  const ov = $('provider-overlay');
+  if (ov) ov.classList.add('show');
 }
 
 function cancelEditProvider() {
-  resetProviderForm();
+  closeProviderForm();
 }
 
 function resetProviderForm() {
-  state.editingProviderId = null;
-  ['p-name', 'p-base', 'p-key', 'p-proxy-url'].forEach(i => $(i).value = '');
-  $('p-proxy').value = 'direct';
-  $('provider-form-title').textContent = t('添加服务商');
-  $('btn-provider-save').textContent = '＋ ' + t('添加服务商');
-  $('btn-provider-cancel').style.display = 'none';
+  closeProviderForm();
 }
 
 async function deleteProvider(id) {
@@ -992,6 +987,8 @@ function renderSettings() {
   const s = state.settings;
   $('s-temperature').value = s.temperature ?? 0.8;
   $('s-ratio').value = s.token_ratio ?? 1.6;
+  $('s-context-length').value = s.context_length ?? '';
+  $('s-max-tokens').value = s.max_tokens ?? '';
   const gp = $('global-prompt');
   if (gp) gp.value = s.global_prompt ?? '';
 }
@@ -1009,9 +1006,13 @@ async function saveGlobalPrompt() {
 }
 
 async function saveSettings() {
+  const ctxVal = $('s-context-length').value.trim();
+  const maxVal = $('s-max-tokens').value.trim();
   const body = {
     temperature: parseFloat($('s-temperature').value) || 0.8,
     token_ratio: parseFloat($('s-ratio').value) || 1.6,
+    context_length: ctxVal === '' ? null : parseInt(ctxVal),
+    max_tokens: maxVal === '' ? null : parseInt(maxVal),
   };
   try {
     state.settings = await api('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });

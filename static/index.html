@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title data-i18n="织叙">织叙-NexTale</title>
-  <link rel="stylesheet" href="style.css?v=20260902c">
+  <link rel="stylesheet" href="style.css?v=20260902i">
 </head>
 <body>
   <header class="topbar">
@@ -86,37 +86,11 @@
       <!-- 大模型API 配置 -->
       <div id="config-tab-api">
         <p class="hint" data-i18n="先添加服务商并「连接」拉取模型列表，再在服务商下「添加模型」——每个模型选类型（文本/视觉二选一）并配置参数，最后点「●」标记设为当前使用。">先添加服务商并「连接」拉取模型列表，再在服务商下「添加模型」——每个模型选类型（文本/视觉二选一）并配置参数，最后点「●」标记设为当前使用。</p>
-        <div id="provider-list" class="card-list"></div>
-
-        <h3 id="provider-form-title" data-i18n="添加服务商">添加服务商</h3>
-        <div class="form-grid">
-          <label><span data-i18n="预设（可选）">预设（可选）</span>
-            <select id="preset-select">
-              <option value="" data-i18n="自定义">自定义</option>
-            </select>
-          </label>
-          <label><span data-i18n="名称">名称</span>
-            <input id="p-name" placeholder="如 DeepSeek" data-i18n-placeholder="如 DeepSeek">
-          </label>
-          <label>Base URL
-            <input id="p-base" placeholder="https://api.deepseek.com/v1">
-          </label>
-          <label>API Key
-            <input id="p-key" type="password" placeholder="sk-...">
-          </label>
-          <label><span data-i18n="代理模式">代理模式</span>
-            <select id="p-proxy">
-              <option value="direct" data-i18n="直连（国内服务商）">直连（国内服务商）</option>
-              <option value="system" data-i18n="系统代理（走环境变量）">系统代理（走环境变量）</option>
-              <option value="custom" data-i18n="自定义代理">自定义代理</option>
-            </select>
-          </label>
-          <label><span data-i18n="自定义代理地址">自定义代理地址</span>
-            <input id="p-proxy-url" placeholder="http://127.0.0.1:4780">
-          </label>
+        <div class="row" style="margin:12px 0">
+          <span class="spacer"></span>
+          <button class="btn primary" onclick="openProviderForm()">＋ <span data-i18n="添加服务商">添加服务商</span></button>
         </div>
-        <button class="btn primary" id="btn-provider-save" onclick="saveProviderForm()">＋ <span data-i18n="添加服务商">添加服务商</span></button>
-        <button class="btn" id="btn-provider-cancel" onclick="cancelEditProvider()" style="display:none" data-i18n="取消编辑">取消编辑</button>
+        <div id="provider-list" class="card-list"></div>
 
         <h3 style="margin-top:28px" data-i18n="生成参数（全局默认，模型可单独覆盖）">生成参数（全局默认，模型可单独覆盖）</h3>
         <div class="form-grid">
@@ -125,6 +99,12 @@
           </label>
           <label><span data-i18n="字数→token 系数">字数→token 系数</span>
             <input id="s-ratio" type="number" step="0.1" min="1" max="3" value="1.6">
+          </label>
+          <label><span data-i18n="最大上下文（token，留空用模型默认）">最大上下文（token，留空用模型默认）</span>
+            <input id="s-context-length" type="number" min="1024" step="1024" placeholder="如 32768 / 128000" data-i18n-placeholder="如 32768 / 128000">
+          </label>
+          <label><span data-i18n="最大输出数（token，留空按字数自动估算）">最大输出数（token，留空按字数自动估算）</span>
+            <input id="s-max-tokens" type="number" min="1" placeholder="如 4096" data-i18n-placeholder="如 4096">
           </label>
         </div>
         <button class="btn primary" onclick="saveSettings()" data-i18n="保存生成参数">保存生成参数</button>
@@ -778,7 +758,78 @@
     </div>
   </div>
 
-  <script src="i18n.js?v=20260902g"></script>
-  <script src="app.js?v=20260902g"></script>
+  <!-- 服务商添加/编辑弹窗 -->
+  <div id="provider-overlay" class="provider-overlay" onclick="if(event.target===this)closeProviderForm()">
+    <div class="provider-modal">
+      <div class="provider-modal-head">
+        <span class="provider-modal-title" id="provider-form-title" data-i18n="添加服务商">添加服务商</span>
+        <button type="button" class="btn" onclick="closeProviderForm()">✕</button>
+      </div>
+      <div class="provider-modal-body">
+        <div class="form-grid">
+          <label><span data-i18n="预设（可选）">预设（可选）</span>
+            <select id="preset-select">
+              <option value="" data-i18n="自定义">自定义</option>
+            </select>
+          </label>
+          <label><span data-i18n="名称">名称</span>
+            <input id="p-name" placeholder="如 DeepSeek" data-i18n-placeholder="如 DeepSeek">
+          </label>
+          <label>Base URL
+            <input id="p-base" placeholder="https://api.deepseek.com/v1">
+          </label>
+          <label>API Key
+            <input id="p-key" type="password" placeholder="sk-...">
+          </label>
+          <label><span data-i18n="代理模式">代理模式</span>
+            <select id="p-proxy">
+              <option value="direct" data-i18n="直连（国内服务商）">直连（国内服务商）</option>
+              <option value="system" data-i18n="系统代理（走环境变量）">系统代理（走环境变量）</option>
+              <option value="custom" data-i18n="自定义代理">自定义代理</option>
+            </select>
+          </label>
+          <label><span data-i18n="自定义代理地址">自定义代理地址</span>
+            <input id="p-proxy-url" placeholder="http://127.0.0.1:4780">
+          </label>
+        </div>
+      </div>
+      <div class="provider-modal-foot">
+        <button class="btn primary" id="btn-provider-save" onclick="saveProviderForm()" data-i18n="保存">保存</button>
+        <button class="btn" onclick="closeProviderForm()" data-i18n="取消">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 模型添加/编辑弹窗 -->
+  <div id="model-overlay" class="provider-overlay" onclick="if(event.target===this)closeModelForm()">
+    <div class="provider-modal">
+      <div class="provider-modal-head">
+        <span class="provider-modal-title" id="model-form-title" data-i18n="添加模型">添加模型</span>
+        <button type="button" class="btn" onclick="closeModelForm()">✕</button>
+      </div>
+      <div class="provider-modal-body">
+        <datalist id="mf-dl"></datalist>
+        <div class="form-grid">
+          <label><span data-i18n="模型名">模型名</span>
+            <input id="mf-name" list="mf-dl" placeholder="连接后从列表选择，也可手输" data-i18n-placeholder="连接后从列表选择，也可手输">
+          </label>
+          <label><span data-i18n="类型">类型</span>
+            <span class="radio-group">
+              <label class="radio-inline"><input type="radio" name="mf-type" value="text" checked> <span data-i18n="文本">文本</span></label>
+              <label class="radio-inline"><input type="radio" name="mf-type" value="vision"> <span data-i18n="视觉">视觉</span></label>
+              <label class="radio-inline"><input type="radio" name="mf-type" value="image"> <span data-i18n="图片">图片</span></label>
+            </span>
+          </label>
+        </div>
+      </div>
+      <div class="provider-modal-foot">
+        <button class="btn primary" id="btn-model-save" onclick="saveModelForm()" data-i18n="保存模型">保存模型</button>
+        <button class="btn" onclick="closeModelForm()" data-i18n="取消">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="i18n.js?v=20260902j"></script>
+  <script src="app.js?v=20260902j"></script>
 </body>
 </html>

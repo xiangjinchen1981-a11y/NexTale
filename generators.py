@@ -40,6 +40,24 @@ def _temperature(context, mcfg=None):
     return float(v)
 
 
+def _max_tokens(context, mcfg=None):
+    """模型条目配置的 max_tokens 优先，其次全局默认，均无则返回 None。"""
+    v = (mcfg or {}).get("max_tokens")
+    if v:
+        return int(v)
+    v = context["settings"].get("max_tokens")
+    return int(v) if v else None
+
+
+def _context_length(context, mcfg=None):
+    """模型条目配置的 context_length 优先，其次全局默认，均无则返回 None。"""
+    v = (mcfg or {}).get("context_length")
+    if v:
+        return int(v)
+    v = context["settings"].get("context_length")
+    return int(v) if v else None
+
+
 def _global_prompt(context):
     """全局前置提示词（附加到所有生成请求）。"""
     return (context.get("settings", {}).get("global_prompt") or "").strip()
@@ -69,7 +87,7 @@ def _context_limit(context, mcfg=None, max_tokens=None):
 
     未配置 context_length 时返回 None（不截断）。
     """
-    cl = (mcfg or {}).get("context_length")
+    cl = _context_length(context, mcfg)
     if not cl:
         return None
     cl = int(cl)
@@ -152,7 +170,7 @@ def _chapter_prompt_and_params(context, novel, chapter_index):
     chapter = chapters[chapter_index - 1]
     words = int(novel.get("words_per_chapter", 2000))
     # max_tokens：模型条目显式配置优先，否则按目标字数×系数估算
-    max_tokens = mcfg.get("max_tokens")
+    max_tokens = _max_tokens(context, mcfg)
     if not max_tokens:
         max_tokens = max(512, int(words * float(context["settings"].get("token_ratio", 1.6))))
 
@@ -269,7 +287,7 @@ def _improv_chapter_prompt_and_params(context, novel, chapter_index, instruction
     """
     provider, model, mcfg = _resolve(context, "text")
     words = int(novel.get("words_per_chapter", 2000))
-    max_tokens = mcfg.get("max_tokens")
+    max_tokens = _max_tokens(context, mcfg)
     if not max_tokens:
         max_tokens = max(512, int(words * float(context["settings"].get("token_ratio", 1.6))))
 
@@ -664,7 +682,7 @@ def _fragment_stream(context, novel, chapter_index, text, action):
     """流式生成润色/扩写结果，yield 增量。"""
     provider, model, mcfg = _resolve(context, "text")
     prompt = _fragment_prompt(context, novel, chapter_index, text, action)
-    max_tokens = mcfg.get("max_tokens") or max(512, int(len(text) * 1.6 * 2))
+    max_tokens = _max_tokens(context, mcfg) or max(512, int(len(text) * 1.6 * 2))
     name = "润色片段" if action == "polish" else "扩写片段"
     for delta in chat_text_stream(
             provider, model, _messages(context, prompt),
@@ -759,7 +777,7 @@ def dialog_stream(context, novel, user_text, history, word_limit=None):
     # 中文 1 字 ≈ 1.5 token，按最终字数换算 max_tokens 并留足余量（至少 256）
     # 若模型显式配置了 max_tokens 且足够大，则取两者较大值，避免被模型配置卡住
     by_words = max(256, int(effective_limit * 1.5 * 1.4))
-    configured = int(mcfg.get("max_tokens") or 0)
+    configured = _max_tokens(context, mcfg) or 0
     max_tokens = max(by_words, configured) if configured else by_words
     for delta in chat_text_stream(
             provider, model, _messages(context, prompt),
@@ -855,7 +873,7 @@ def _rewrite_prompt(context, novel, chapter_index):
     if wb_text:
         prompt += "\n\n【世界书设定】\n" + wb_text
     # 改写可能扩写或缩写，按原文长度预留余量
-    max_tokens = mcfg.get("max_tokens") or max(512, int(len(text) * 1.6 * 1.5))
+    max_tokens = _max_tokens(context, mcfg) or max(512, int(len(text) * 1.6 * 1.5))
     return provider, model, mcfg, prompt, max_tokens
 
 
@@ -878,7 +896,7 @@ def _continue_prompt(context, novel, chapter_index, instruction):
     """构造续写单章的 prompt（以导入原文为前情）。"""
     provider, model, mcfg = _resolve(context, "text")
     words = int(novel.get("words_per_chapter", 2000))
-    max_tokens = mcfg.get("max_tokens")
+    max_tokens = _max_tokens(context, mcfg)
     if not max_tokens:
         max_tokens = max(512, int(words * float(context["settings"].get("token_ratio", 1.6))))
 
@@ -1287,7 +1305,7 @@ def analyze_source_profile(context, novel, on_progress=None):
         raise AIClientError("尚未导入原文，无法拆解")
     # 拆解输出 JSON 较大（人物+世界观+主线+摘要）；推理类模型的思考过程也计入
     # max_tokens 额度，额度过小会导致结果被截断甚至返回空内容，默认预留 32768
-    max_tokens = int(mcfg.get("max_tokens") or 32768)
+    max_tokens = _max_tokens(context, mcfg) or 32768
     limit = _context_limit(context, mcfg, max_tokens)
     # 每块原文上限（字符）：留出提示词 + 输出 token 的余量；未配置上下文时用保守默认
     block_chars = max(limit - 3000, 6000) if limit else 50000

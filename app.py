@@ -429,7 +429,8 @@ def get_settings(request: Request):
 def save_settings(request: Request, body: dict):
     uid = request.state.user_id
     allowed = {"text_model_id", "vision_model_id", "image_model_id",
-               "token_ratio", "temperature", "global_prompt", "prompts"}
+               "token_ratio", "temperature", "global_prompt", "prompts",
+               "max_tokens", "context_length"}
     cur = storage.get_settings(uid)
     for k in allowed:
         if k in body:
