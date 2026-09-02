@@ -75,24 +75,24 @@ async function api(path, opts = {}) {
 }
 
 function toast(msg, type = '') {
-  const t = $('toast');
+  const el = $('toast');
   // 防御：若 msg 不是字符串（如对象），转为可读字符串
   if (typeof msg !== 'string') {
     try { msg = msg.message || JSON.stringify(msg); } catch (e) { msg = String(msg); }
   }
-  t.textContent = msg;
-  t.className = 'toast show ' + type;
-  clearTimeout(t._timer);
-  t._timer = setTimeout(() => t.className = 'toast', 3200);
+  el.textContent = t(msg);
+  el.className = 'toast show ' + type;
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.className = 'toast', 3200);
 }
 
 // 全屏加载遮罩：带进度条（可传入标题与副标题）
 function showLoading(title = '处理中…', sub = '') {
   const ov = $('loading-overlay');
-  const t = $('loading-title');
+  const el = $('loading-title');
   const s = $('loading-sub');
   const bar = $('loading-bar-fill');
-  if (t) t.textContent = title;
+  if (el) el.textContent = t(title);
   if (s) s.textContent = sub;
   if (bar) bar.style.width = '0%';
   ov.classList.add('show');
@@ -1748,7 +1748,7 @@ function renderModeFilterOptions() {
 
 // 状态显示名
 function statusLabel(s) {
-  return { 'draft': '草稿', 'outlined': '已生成大纲', 'generating': '生成中', 'done': '已完成', 'finished': '已完结' }[s] || s;
+  return t({ 'draft': '草稿', 'outlined': '已生成大纲', 'generating': '生成中', 'done': '已完成', 'finished': '已完结' }[s] || s);
 }
 
 // 小说列表分页状态
@@ -1767,7 +1767,7 @@ const NOVEL_MODES = [
 // 创作模式显示名
 function modeLabel(m) {
   const item = NOVEL_MODES.find(x => x.value === m);
-  return item ? item.label : '大纲';
+  return t(item ? item.label : '大纲');
 }
 
 // 渲染一个小说卡片（供列表与垃圾箱复用）
@@ -1780,19 +1780,20 @@ function novelCardHTML(n) {
   const genCount = (n.chapters || []).filter(c => c.content).length;
   const isFinished = n.status === 'finished';
   const created = n.created_at ? new Date(n.created_at * 1000).toLocaleString('zh-CN', { hour12: false }) : '';
+  const meta = `${esc(n.genre || t('未设题材'))} · ${n.chapter_count}${t('章')} · ${n.words_per_chapter}${t('字/章')} · ${t('角色')}${(n.character_ids || []).length} · ${t('已生成')} ${genCount} ${t('章')} · ${t('模型')}${n.text_model_id ? esc(modelLabel(n.text_model_id)) : t('（全局）')}`;
   let primaryBtn;
   if (isDialog) {
-    primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/dialog')">进入对话</button>`;
+    primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/dialog')">${t('进入对话')}</button>`;
   } else if (isImprov) {
-    primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/improv')">进入写作（${genCount} 章）</button>`;
+    primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/improv')">${t('进入写作（{n} 章）', { n: genCount })}</button>`;
   } else if (isRewrite) {
-    primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/rewrite')">进入改写（${hasOutline ? n.chapters.length : 0} 段）</button>`;
+    primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/rewrite')">${t('进入改写（{n} 段）', { n: hasOutline ? n.chapters.length : 0 })}</button>`;
   } else if (isContinue) {
-    primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/continue')">进入续写（${genCount} 章）</button>`;
+    primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/continue')">${t('进入续写（{n} 章）', { n: genCount })}</button>`;
   } else if (hasOutline) {
-    primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/generate')">进入生成（${genCount}/${n.chapter_count}）</button>`;
+    primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/generate')">${t('进入生成（{n}/{m}）', { n: genCount, m: n.chapter_count })}</button>`;
   } else {
-    primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/edit')">继续创作</button>`;
+    primaryBtn = `<button class="btn primary" onclick="nav('#/novels/${n.id}/edit')">${t('继续创作')}</button>`;
   }
   const modeBadge = `<span class="badge">${modeLabel(n.mode)}</span>`;
   if (isFinished) {
@@ -1805,13 +1806,13 @@ function novelCardHTML(n) {
         <span class="spacer"></span>
         ${created ? `<span class="meta">${esc(created)}</span>` : ''}
       </div>
-      <div class="meta">${esc(n.genre || '未设题材')} · ${n.chapter_count}章 · ${n.words_per_chapter}字/章 · 角色${(n.character_ids || []).length} · 已生成 ${genCount} 章 · 模型${n.text_model_id ? esc(modelLabel(n.text_model_id)) : '（全局）'}</div>
+      <div class="meta">${meta}</div>
       <div class="row" style="margin-top:10px">
-        ${genCount > 0 ? `<button class="btn" onclick="nav('#/novels/${n.id}/read')">阅读</button>` : ''}
-        <button class="btn" onclick="exportNovel('${n.id}', 'md')">导出 MD</button>
-        <button class="btn" onclick="reopenNovel('${n.id}')">重开</button>
+        ${genCount > 0 ? `<button class="btn" onclick="nav('#/novels/${n.id}/read')">${t('阅读')}</button>` : ''}
+        <button class="btn" onclick="exportNovel('${n.id}', 'md')">${t('导出 MD')}</button>
+        <button class="btn" onclick="reopenNovel('${n.id}')">${t('重开')}</button>
         <span class="spacer"></span>
-        <button class="btn danger" onclick="deleteNovel('${n.id}')">删除</button>
+        <button class="btn danger" onclick="deleteNovel('${n.id}')">${t('删除')}</button>
       </div>
     </div>`;
   }
@@ -1824,15 +1825,15 @@ function novelCardHTML(n) {
       <span class="spacer"></span>
       ${created ? `<span class="meta">${esc(created)}</span>` : ''}
     </div>
-    <div class="meta">${esc(n.genre || '未设题材')} · ${n.chapter_count}章 · ${n.words_per_chapter}字/章 · 角色${(n.character_ids || []).length} · 已生成 ${genCount} 章 · 模型${n.text_model_id ? esc(modelLabel(n.text_model_id)) : '（全局）'}</div>
+    <div class="meta">${meta}</div>
     <div class="row" style="margin-top:10px">
       ${primaryBtn}
-      ${genCount > 0 ? `<button class="btn" onclick="nav('#/novels/${n.id}/read')">阅读</button>` : ''}
-      <button class="btn" onclick="nav('#/novels/${n.id}/edit')">编辑设定</button>
-      <button class="btn" onclick="exportNovel('${n.id}', 'md')">导出 MD</button>
-      <button class="btn" onclick="finishNovel('${n.id}')">完结</button>
+      ${genCount > 0 ? `<button class="btn" onclick="nav('#/novels/${n.id}/read')">${t('阅读')}</button>` : ''}
+      <button class="btn" onclick="nav('#/novels/${n.id}/edit')">${t('编辑设定')}</button>
+      <button class="btn" onclick="exportNovel('${n.id}', 'md')">${t('导出 MD')}</button>
+      <button class="btn" onclick="finishNovel('${n.id}')">${t('完结')}</button>
       <span class="spacer"></span>
-      <button class="btn danger" onclick="deleteNovel('${n.id}')">删除</button>
+      <button class="btn danger" onclick="deleteNovel('${n.id}')">${t('删除')}</button>
     </div>
   </div>`;
 }
@@ -1886,10 +1887,10 @@ function renderNovels() {
 
   // 数量提示
   const cnt = $('novel-count');
-  if (cnt) cnt.textContent = `共 ${list.length} 本`;
+  if (cnt) cnt.textContent = t('共 {n} 本', { n: list.length });
 
   if (!list.length) {
-    box.innerHTML = '<div class="card meta">没有符合条件的小说。</div>';
+    box.innerHTML = `<div class="card meta">${t('没有符合条件的小说。')}</div>`;
     const pg = $('novel-pagination'); if (pg) pg.innerHTML = '';
     return;
   }
@@ -4843,8 +4844,23 @@ function renderAnalyzedCharacters() {
     </div>`;
 }
 
+// 语言切换后：重新应用翻译并刷新当前视图
+function onLocaleChanged() {
+  applyStaticI18n();
+  const langSel = $('lang-select');
+  if (langSel) langSel.value = getLocale();
+  // 已登录时重新渲染当前视图；未登录时只刷新静态文案
+  if (typeof router === 'function') router();
+}
+
 // ============ 初始化 ============
 (async function init() {
+  // 初始化国际化（读取本地语言偏好并应用静态文案）
+  initLocale();
+  applyStaticI18n();
+  const langSel = $('lang-select');
+  if (langSel) langSel.value = getLocale();
+
   // 加载版本号（公开接口，无需登录）
   try {
     const v = await fetch('/api/version').then(r => r.json());

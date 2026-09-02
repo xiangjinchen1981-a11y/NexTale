@@ -719,6 +719,19 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent-soft
 }
 .theme-toggle:hover { background: var(--accent-soft); }
 
+/* 语言切换下拉 */
+.lang-select {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.lang-select:focus { outline: none; border-color: var(--accent); }
+
 /* 即兴交互式写作 */
 .improv-input-card { margin-bottom: 16px; }
 .improv-input-card textarea {
